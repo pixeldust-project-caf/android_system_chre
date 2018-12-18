@@ -53,8 +53,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fstream>
+#include <string>
 
-<<<<<<< HEAD
 #ifdef REMOTE_HANDLE_SPD
 extern "C" {
 #include "remote.h"
@@ -62,10 +63,6 @@ extern "C" {
 
 #define ITRANSPORT_PREFIX "'\":;./\\"
 #endif
-=======
-#include <fstream>
-#include <string>
->>>>>>> d3c06aac9a484d237613a0ab232559c359a3cae2
 
 #include "chre/platform/slpi/fastrpc.h"
 #include "chre_host/log.h"
