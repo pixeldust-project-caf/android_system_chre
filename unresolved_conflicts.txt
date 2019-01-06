@@ -1,0 +1,6 @@
+# List of unresolved conflicts
+# Generated with `git ls-files --unmerged`
+
+100644 276135ece5e67721b6cd199b122dfe085d30df39 1	host/msm/daemon/chre_daemon.cc
+100644 d0460de950366b17d49df1188c5abde53c6f248b 2	host/msm/daemon/chre_daemon.cc
+100644 e1461cc99993d3c1a943d3571f154c210c3789ae 3	host/msm/daemon/chre_daemon.cc
