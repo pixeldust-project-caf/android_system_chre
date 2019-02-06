@@ -22,6 +22,14 @@ $(error "The NANOAPP_VERSION variable must be set to the version of the nanoapp.
          This should be assigned by the Makefile that includes app.mk.")
 endif
 
+NANOAPP_VERSION := $(strip $(NANOAPP_VERSION))
+MATCHED_NANOAPP_VERSION := $(shell echo $(NANOAPP_VERSION) \
+                                 | grep "^0x[0-9a-fA-F]\{8\}")
+ifneq ($(MATCHED_NANOAPP_VERSION), $(NANOAPP_VERSION))
+$(error "The NANOAPP_VERSION must be a 4-byte hex-formatted integer. Example: \
+         0x00000101")
+endif
+
 ifeq ($(NANOAPP_NAME_STRING),)
 $(error "The NANOAPP_NAME_STRING variable must be set to the friendly name of \
          the nanoapp. This should be assigned by the Makefile that includes \
@@ -78,6 +86,13 @@ COMMON_CFLAGS += -DNANOAPP_VERSION=$(NANOAPP_VERSION)
 COMMON_CFLAGS += -DNANOAPP_VENDOR_STRING=$(NANOAPP_VENDOR_STRING)
 COMMON_CFLAGS += -DNANOAPP_NAME_STRING=$(NANOAPP_NAME_STRING)
 COMMON_CFLAGS += -DNANOAPP_IS_SYSTEM_NANOAPP=$(NANOAPP_IS_SYSTEM_NANOAPP)
+
+# Version String ###############################################################
+
+COMMIT_HASH_DIRTY_SUFFIX = $(shell git diff --quiet || echo -dirty)
+COMMIT_HASH = $(shell git log -1 --pretty="format:%h" .)$(COMMIT_HASH_DIRTY_SUFFIX)
+NANOAPP_VERSION_STRING = "nanoapp=$(NANOAPP_NAME)@$(COMMIT_HASH)"
+COMMON_CFLAGS += -DNANOAPP_VERSION_STRING="\"$(NANOAPP_VERSION_STRING)\""
 
 # Variant-specific Nanoapp Support Source Files ################################
 
