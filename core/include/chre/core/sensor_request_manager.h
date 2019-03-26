@@ -20,6 +20,9 @@
 #include "chre/core/request_multiplexer.h"
 #include "chre/core/sensor.h"
 #include "chre/core/sensor_request.h"
+#include "chre/core/timer_pool.h"
+#include "chre/platform/system_time.h"
+#include "chre/platform/system_timer.h"
 #include "chre/util/fixed_size_vector.h"
 #include "chre/util/non_copyable.h"
 #include "chre/util/optional.h"
@@ -129,6 +132,17 @@ class SensorRequestManager : public NonCopyable {
   bool flushAsync(Nanoapp *nanoapp, uint32_t sensorHandle, const void *cookie);
 
   /**
+   * Invoked by the PlatformSensor when a flush complete event is received for a
+   * given sensor for a request done through flushAsync(). This method can be
+   * invoked from any thread, and defers processing the event to the main CHRE
+   * event loop.
+   *
+   * @param errorCode An error code from enum chreError
+   * @param sensorType The SensorType of sensor that has completed the flush.
+   */
+  void handleFlushCompleteEvent(uint8_t errorCode, SensorType sensorType);
+
+  /**
    * Prints state in a string buffer. Must only be called from the context of
    * the main CHRE thread.
    *
@@ -140,18 +154,85 @@ class SensorRequestManager : public NonCopyable {
                         size_t bufferSize) const;
 
  private:
+  //! An internal structure to store incoming sensor flush requests
+  struct FlushRequest {
+    FlushRequest(SensorType type, uint32_t id, const void *cookiePtr) {
+      sensorType = type;
+      nanoappInstanceId = id;
+      cookie = cookiePtr;
+    }
+
+    //! The sensor type the flush request is for.
+    SensorType sensorType;
+    //! The ID of the nanoapp that requested the flush.
+    uint32_t nanoappInstanceId;
+    //! The opaque pointer provided in flushAsync().
+    const void *cookie;
+    //! The timestamp at which this request should complete.
+    Nanoseconds deadlineTimestamp = SystemTime::getMonotonicTime() +
+        Nanoseconds(CHRE_SENSOR_FLUSH_COMPLETE_TIMEOUT_NS);
+  };
+
   /**
    * This allows tracking the state of a sensor with the various requests for it
    * and can trigger a change in mode/rate/latency when required.
    */
-  struct SensorRequests {
-    //! The sensor associated with this request multiplexer. If this Optional
-    //! container does not have a value, then the platform does not support this
-    //! type of sensor.
-    Optional<Sensor> sensor;
+  class SensorRequests {
+   public:
+     /**
+      * Initializes the sensor object. This method must only be invoked once
+      * when the SensorRequestManager initializes.
+      *
+      * @param sensor The sensor object to initialize with.
+      */
+    void setSensor(Sensor&& sensor) {
+      CHRE_ASSERT(!mSensor.has_value());
+      mSensor = std::move(sensor);
+    }
 
-    //! The request multiplexer for this sensor.
-    RequestMultiplexer<SensorRequest> multiplexer;
+    /**
+     * @return true if the sensor is supported by the platform.
+     */
+    bool isSensorSupported() const {
+      return mSensor.has_value();
+    }
+
+    /**
+     * @return The set of active requests for this sensor.
+     */
+    const DynamicVector<SensorRequest>& getRequests() const {
+      return mMultiplexer.getRequests();
+    }
+
+    /**
+     * @return A constant reference to the sensor object. This method has an
+     * undefined behavior if isSensorSupported() is false.
+     */
+    const Sensor& getSensor() const {
+      return mSensor.value();
+    }
+
+    /**
+     * @return A reference to the sensor object. This method has an undefined
+     * behavior if isSensorSupported() is false.
+     */
+    Sensor& getSensor() {
+      return mSensor.value();
+    }
+
+    /**
+     * Gets the sensor's sampling status. The caller must ensure that
+     * isSensorSupported() is true before invoking this method.
+     *
+     * @param status A non-null pointer where the sampling status will be
+     * stored, if successful.
+     *
+     * @return true if getting the sampling status succeeded.
+     */
+    bool getSamplingStatus(struct chreSensorSamplingStatus *status) const {
+      CHRE_ASSERT(isSensorSupported());
+      return mSensor->getSamplingStatus(status);
+    }
 
     /**
      * Searches through the list of sensor requests for a request owned by the
@@ -160,10 +241,10 @@ class SensorRequestManager : public NonCopyable {
      *
      * @param instanceId The instance ID of the nanoapp whose request is being
      *        searched for.
-     * @param index A non-null pointer to an index that is populated if a request
-     *        for this nanoapp is found.
-     * @return A pointer to a SensorRequest that is owned by the provided nanoapp
-     *         if one is found otherwise nullptr.
+     * @param index A non-null pointer to an index that is populated if a
+     *        request for this nanoapp is found.
+     * @return A pointer to a SensorRequest that is owned by the provided
+     *         nanoapp if one is found otherwise nullptr.
      */
     const SensorRequest *find(uint32_t instanceId, size_t *index) const;
 
@@ -212,10 +293,86 @@ class SensorRequestManager : public NonCopyable {
      *         configuration successfully updated.
      */
     bool removeAll();
+
+    /**
+     * Makes a specified flush request for this sensor, and sets the timeout
+     * timer appropriately. If there already is a pending flush request, then
+     * this method does nothing.
+     *
+     * @param request the request to make
+     *
+     * @return An error code from enum chreError
+     */
+    uint8_t makeFlushRequest(const FlushRequest& request);
+
+    /**
+     * Cancels a timeout timer for a pending flush request.
+     */
+    void cancelFlushTimer();
+
+   private:
+    //! The sensor associated with this request multiplexer. If this Optional
+    //! container does not have a value, then the platform does not support this
+    //! type of sensor.
+    Optional<Sensor> mSensor;
+
+    //! The request multiplexer for this sensor.
+    RequestMultiplexer<SensorRequest> mMultiplexer;
+
+    //! The timeout timer handle for the current flush request.
+    TimerHandle mFlushRequestTimerHandle = CHRE_TIMER_INVALID;
+
+    /**
+     * @return true if a flush through makeFlushRequest is pending.
+     */
+    inline bool isFlushRequestPending() const {
+      return mFlushRequestTimerHandle != CHRE_TIMER_INVALID;
+    }
   };
 
-  //! The list of sensor requests
+  //! The list of sensor requests.
   FixedSizeVector<SensorRequests, getSensorTypeCount()> mSensorRequests;
+
+  //! A queue of flush requests made by nanoapps.
+  static constexpr size_t kMaxFlushRequests = 16;
+  FixedSizeVector<FlushRequest, kMaxFlushRequests> mFlushRequestQueue;
+
+  /**
+   * Helper function to convert SensorType to SensorRequests.
+   */
+  SensorRequests& getSensorRequests(SensorType sensorType) {
+    size_t index = getSensorTypeArrayIndex(sensorType);
+    return mSensorRequests[index];
+  }
+
+  /**
+   * Posts an event to a nanoapp indicating the completion of a flush request.
+   *
+   * @param sensorHandle The handle of the sensor for this event.
+   * @param errorCode An error code from enum chreError
+   * @param request The corresponding FlushRequest.
+   */
+  void postFlushCompleteEvent(
+    uint32_t sensorHandle, uint8_t errorCode, const FlushRequest& request);
+
+  /**
+   * Dispatches the next flush request for the given sensor. If there are no
+   * more pending flush requests, this method does nothing.
+   *
+   * @param sensorHandle The handle of the sensor to apply a request for.
+   * @param sensorType The corresponding sensor type.
+   */
+  void dispatchNextFlushRequest(uint32_t sensorHandle, SensorType sensorType);
+
+  /**
+   * Handles a complete event for a sensor flush requested through flushAsync.
+   * See handleFlushCompleteEvent which may be called from any thread. This
+   * method is intended to be invoked on the CHRE event loop thread.
+   *
+   * @param errorCode An error code from enum chreError
+   * @param sensorType The SensorType of sensor that has completed the flush.
+   */
+  void handleFlushCompleteEventSync(uint8_t errorCode, SensorType sensorType);
 };
 
 }  // namespace chre
