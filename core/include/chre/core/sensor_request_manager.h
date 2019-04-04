@@ -93,6 +93,10 @@ class SensorRequestManager : public NonCopyable {
   /**
    * Obtains a pointer to the Sensor of the specified sensorType.
    *
+   * NOTE: Some platform implementations invoke this method from different
+   * threads assuming the underlying list of sensors doesn't change after
+   * initialization.
+   *
    * @param sensorType The SensorType of the sensor.
    * @return A pointer to the Sensor of sensorType, or nullptr if sensorType is
    *         invalid or the requested SensorType is not supported on the current
@@ -117,6 +121,31 @@ class SensorRequestManager : public NonCopyable {
    * @return The list of open requests of this sensor in a DynamicVector.
    */
   const DynamicVector<SensorRequest>& getRequests(SensorType sensorType) const;
+
+  /**
+   * Configures a nanoapp to receive bias events.
+   *
+   * @param nanoapp A non-null pointer to the nanoapp making this request.
+   * @param sensorHandle The handle of the sensor to receive bias events for.
+   * @param enable true to enable bias event reporting.
+   *
+   * @return true if the configuration was successful.
+   */
+  bool configureBiasEvents(
+      Nanoapp *nanoapp, uint32_t sensorHandle, bool enable);
+
+  /**
+   * Synchronously retrieves the current bias for a sensor that supports
+   * data in the chreSensorThreeAxisData format.
+   *
+   * @param sensorHandle The handle of the sensor to retrieve bias data for.
+   * @param bias A non-null pointer to store the current bias data.
+   *
+   * @return false if the sensor handle was invalid or the sensor does not
+   *     report bias data in the chreSensorThreeAxisData format.
+   */
+  bool getThreeAxisBias(
+      uint32_t sensorHandle, struct chreSensorThreeAxisData *bias) const;
 
   /**
    * Makes a sensor flush request for a nanoapp asynchronously.
@@ -231,7 +260,22 @@ class SensorRequestManager : public NonCopyable {
      */
     bool getSamplingStatus(struct chreSensorSamplingStatus *status) const {
       CHRE_ASSERT(isSensorSupported());
-      return mSensor->getSamplingStatus(status);
+      return isSensorSupported() ? mSensor->getSamplingStatus(status) : false;
+    }
+
+    /**
+     * Synchronously retrieves the current bias for a sensor that supports
+     * data in the chreSensorThreeAxisData format. The caller must ensure that
+     * isSensorSupported() is true before invoking this method.
+     *
+     * @param bias A non-null pointer to store the current bias data.
+     *
+     * @return false if sensor does not report bias data in the
+     *     chreSensorThreeAxisData format.
+     */
+    bool getThreeAxisBias(struct chreSensorThreeAxisData *bias) const {
+      CHRE_ASSERT(isSensorSupported());
+      return isSensorSupported() ? mSensor->getThreeAxisBias(bias) : false;
     }
 
     /**
