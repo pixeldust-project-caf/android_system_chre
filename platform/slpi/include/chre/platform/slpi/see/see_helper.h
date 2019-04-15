@@ -53,12 +53,6 @@ class SeeHelperCallbackInterface {
     bool latencyValid;
   };
 
-  struct SensorBiasData {
-    //! The sensor type of the calibrated sensor, e.g. SensorType::Accelerometer
-    SensorType sensorType;
-    struct chreSensorThreeAxisData bias;
-  };
-
   virtual ~SeeHelperCallbackInterface() {}
 
   //! Invoked by the SEE thread to update sampling status.
@@ -75,7 +69,11 @@ class SeeHelperCallbackInterface {
   virtual void onHostWakeSuspendEvent(bool apAwake) = 0;
 
   //! Invoked by the SEE thread to provide the sensor bias event.
-  virtual void onSensorBiasEvent(UniquePtr<SensorBiasData>&& biasData) = 0;
+  //! The bias is generated with the sensorHandle field set to that of
+  //! runtime-calibrated sensors, regardless of whether the runtime-calibrated
+  //! or uncalibrated versions of the sensor is enabled.
+  virtual void onSensorBiasEvent(
+      UniquePtr<struct chreSensorThreeAxisData>&& biasData) = 0;
 
   //! Invoked by the SEE thread to notify a flush complete
   virtual void onFlushCompleteEvent(SensorType sensorType) = 0;
