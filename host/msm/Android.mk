@@ -56,7 +56,7 @@ ifeq ($(call is-board-platform-in-list, sdm710), true)
 LOCAL_CFLAGS += -DREMOTE_HANDLE_SPD
 LOCAL_SHARED_LIBRARIES += libadsprpc
 else
-LOCAL_SHARED_LIBRARIES += libsdsprpc
+#LOCAL_SHARED_LIBRARIES += libsdsprpc
 endif
 
 include $(BUILD_EXECUTABLE)
