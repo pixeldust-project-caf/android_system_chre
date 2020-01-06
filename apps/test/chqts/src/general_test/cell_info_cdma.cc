@@ -18,7 +18,7 @@
 namespace general_test {
 
 bool CellInfoCdma::validateIdentity(
-    const struct chreWwanCellIdentityCdma identity) {
+    const struct chreWwanCellIdentityCdma &identity) {
   bool valid = false;
   constexpr int32_t max = INT32_MAX;
 
@@ -41,13 +41,13 @@ bool CellInfoCdma::validateIdentity(
 }
 
 bool CellInfoCdma::validateSignalStrengthCdma(
-    const struct chreWwanSignalStrengthCdma strength) {
+    const struct chreWwanSignalStrengthCdma &strength) {
   bool valid = false;
 
   // TODO: Find exact limits on dbm and ecio
-  if ((strength.dbm < 0) || (strength.dbm > 160)) {
+  if (!isBoundedInt32(strength.dbm, 0, 160, INT32_MAX)) {
     sendFatalFailureInt32("Invalid CDMA/CDMA dbm: %d", strength.dbm);
-  } else if ((strength.ecio < 0) || (strength.ecio > 1600)) {
+  } else if (!isBoundedInt32(strength.ecio, 0, 1600, INT32_MAX)) {
     sendFatalFailureInt32("Invalid CDMA/CDMA ecio: %d", strength.ecio);
   } else {
     valid = true;
@@ -57,16 +57,15 @@ bool CellInfoCdma::validateSignalStrengthCdma(
 }
 
 bool CellInfoCdma::validateSignalStrengthEvdo(
-    const struct chreWwanSignalStrengthEvdo strength) {
+    const struct chreWwanSignalStrengthEvdo &strength) {
   bool valid = false;
 
   // TODO: Find exact limits on dbm and ecio
-  if ((strength.dbm < 0) || (strength.dbm > 160)) {
+  if (!isBoundedInt32(strength.dbm, 0, 160, INT32_MAX)) {
     sendFatalFailureInt32("Invalid CDMA/EVDO dbm: %d", strength.dbm);
-  } else if ((strength.ecio < 0) || (strength.ecio > 1600)) {
+  } else if (!isBoundedInt32(strength.ecio, 0, 1600, INT32_MAX)) {
     sendFatalFailureInt32("Invalid CDMA/EVDO ecio: %d", strength.ecio);
-  } else if ((strength.signalNoiseRatio < 0) ||
-             (strength.signalNoiseRatio > 8)) {
+  } else if (!isBoundedInt32(strength.signalNoiseRatio, 0, 8, INT32_MAX)) {
     sendFatalFailureInt32("Invalid evdo signal noise ratio: %d",
                           strength.signalNoiseRatio);
   } else {

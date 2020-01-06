@@ -32,6 +32,10 @@ SLPI_CFLAGS += -Iplatform/slpi/include
 # We use FlatBuffers in the SLPI platform layer
 SLPI_CFLAGS += $(FLATBUFFERS_CFLAGS)
 
+ifneq ($(CHRE_ENABLE_ACCEL_CAL), false)
+SLPI_CFLAGS += -DCHRE_ENABLE_ACCEL_CAL
+endif
+
 # SLPI/SEE-specific Compiler Flags #############################################
 
 # Include paths.
@@ -78,6 +82,7 @@ SLPI_SRCS += platform/shared/pal_system_api.cc
 SLPI_SRCS += platform/shared/system_time.cc
 SLPI_SRCS += platform/slpi/chre_api_re.cc
 SLPI_SRCS += platform/slpi/debug_dump.cc
+SLPI_SRCS += platform/slpi/fatal_error.cc
 SLPI_SRCS += platform/slpi/host_link.cc
 SLPI_SRCS += platform/slpi/init.cc
 SLPI_SRCS += platform/slpi/memory.cc

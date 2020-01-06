@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2019 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef _GTS_NANOAPPS_GENERAL_TEST_CELL_INFO_LTE_H_
-#define _GTS_NANOAPPS_GENERAL_TEST_CELL_INFO_LTE_H_
+#ifndef _GTS_NANOAPPS_GENERAL_TEST_CELL_INFO_NR_H_
+#define _GTS_NANOAPPS_GENERAL_TEST_CELL_INFO_NR_H_
 
 #include <general_test/cell_info_base.h>
 
@@ -22,16 +22,17 @@
 
 namespace general_test {
 
-class CellInfoLte : private CellInfoBase {
+class CellInfoNr : private CellInfoBase {
  public:
-  static bool validate(const struct chreWwanCellInfoLte &cell);
+  static bool validate(const struct chreWwanCellInfoNr &cell, bool registered);
 
  private:
-  static bool validateIdentity(const struct chreWwanCellIdentityLte &identity);
+  static bool validateIdentity(const struct chreWwanCellIdentityNr &identity,
+                               bool registered);
   static bool validateSignalStrength(
-      const struct chreWwanSignalStrengthLte &strength);
+      const struct chreWwanSignalStrengthNr &strength);
 };
 
 }  // namespace general_test
 
-#endif  // _GTS_NANOAPPS_GENERAL_TEST_CELL_INFO_LTE_H_
+#endif  // _GTS_NANOAPPS_GENERAL_TEST_CELL_INFO_NR_H_
