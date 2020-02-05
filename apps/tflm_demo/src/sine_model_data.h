@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2020 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +14,15 @@
  * limitations under the License.
  */
 
-cc_library_host_static {
-    name: "chre_chpp_linux",
-    srcs: [
-        "transport.c",
-        "platform/linux/memory.c",
-    ],
-    export_include_dirs: [
-        "platform/linux/include",
-        "include",
-    ],
-}
+// This is a standard TensorFlow Lite model file that has been converted into a
+// C data array, so it can be easily compiled into a binary for devices that
+// don't have a file system. It was created using the command:
+// xxd -i sine_model.tflite > sine_model_data.cc
 
-cc_test_host {
-    name: "chre_chpp_linux_tests",
-    srcs: ["test/transport_test.cpp"],
-    static_libs: ["chre_chpp_linux"],
-}
+#ifndef NANOAPPS_TFLM_DEMO_SINE_MODEL_DATA_H_
+#define NANOAPPS_TFLM_DEMO_SINE_MODEL_DATA_H_
+
+extern const unsigned char g_sine_model_data[];
+extern const int g_sine_model_data_len;
+
+#endif  // NANOAPPS_TFLM_DEMO_SINE_MODEL_DATA_H_

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2020 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
-cc_library_host_static {
-    name: "chre_chpp_linux",
-    srcs: [
-        "transport.c",
-        "platform/linux/memory.c",
-    ],
-    export_include_dirs: [
-        "platform/linux/include",
-        "include",
-    ],
+#include <chre.h>
+
+#include "chre/util/nanoapp/log.h"
+#include "model.h"
+
+#define LOG_TAG "[TFLM demo]"
+
+bool nanoappStart(void) {
+  float y_val = ::demo::run(3.14);
+  LOGI("result = %f", y_val);
+  return true;
 }
 
-cc_test_host {
-    name: "chre_chpp_linux_tests",
-    srcs: ["test/transport_test.cpp"],
-    static_libs: ["chre_chpp_linux"],
-}
+void nanoappEnd(void) {}
+
+void nanoappHandleEvent(uint32_t sender_instance_id, uint16_t event_type,
+                        const void *event_data) {}
