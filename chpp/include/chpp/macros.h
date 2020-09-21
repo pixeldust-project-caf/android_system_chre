@@ -18,6 +18,7 @@
 #define CHPP_MACROS_H_
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdlib.h>
 
@@ -52,6 +53,10 @@ extern "C" {
 #define CHPP_DEBUG_ASSERT(var) CHPP_ASSERT(var)
 #endif
 
+#ifndef PRIu64  // Pre-C99 lacks PRIu64 / llu support
+#define PRIu64 "lu"
+#endif
+
 #if defined(__GNUC__) && (__STDC_VERSION__ >= 201112L)
 #define CHPP_C11_OR_NEWER
 #endif
@@ -66,11 +71,17 @@ extern "C" {
 #define CHPP_STATIC_ASSERT2(cond, line) CHPP_STATIC_ASSERT3(cond, line)
 #define CHPP_STATIC_ASSERT(cond, msg) CHPP_STATIC_ASSERT2(cond, __LINE__)
 
-#endif
+#endif  // CHPP_C11_OR_NEWER
 
-// TODO: Need platform-based time functionality
-#define chppGetCurrentTime() 1
+// Time-related macros
 #define CHPP_TIME_NONE 0
+#define CHPP_MSEC_PER_SEC UINT64_C(1000)
+#define CHPP_USEC_PER_MSEC UINT64_C(1000)
+#define CHPP_NSEC_PER_USEC UINT64_C(1000)
+#define CHPP_USEC_PER_SEC (CHPP_USEC_PER_MSEC * CHPP_MSEC_PER_SEC)
+#define CHPP_NSEC_PER_MSEC (CHPP_NSEC_PER_USEC * CHPP_USEC_PER_MSEC)
+#define CHPP_NSEC_PER_SEC \
+  (CHPP_NSEC_PER_USEC * CHPP_USEC_PER_MSEC * CHPP_MSEC_PER_SEC)
 
 #if defined(__GNUC__) || defined(__clang__)
 #define check_types_match(t1, t2) ((__typeof__(t1) *)0 != (__typeof__(t2) *)0)

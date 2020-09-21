@@ -22,8 +22,9 @@
 #include <stdint.h>
 
 #include "chpp/app.h"
+#include "chpp/condition_variable.h"
 #include "chpp/macros.h"
-#include "chpp/notifier.h"
+#include "chpp/mutex.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -70,8 +71,9 @@ struct ChppClientState {
   uint8_t handle;                   // Handle number for this client
   uint8_t transaction;              // Next Transaction ID to be used
 
-  bool waitingForResponse;               // For sync. request/responses
-  struct ChppNotifier responseNotifier;  // For sync. request/responses
+  bool responseReady;  // For sync. request/responses
+  struct ChppMutex responseMutex;
+  struct ChppConditionVariable responseCondVar;
 };
 
 #ifdef CHPP_CLIENT_ENABLED_CHRE_WWAN
@@ -85,6 +87,12 @@ struct ChppClientState {
 #ifdef CHPP_CLIENT_ENABLED_CHRE_GNSS
 #define CHPP_CLIENT_ENABLED_GNSS
 #endif
+
+// The default timeout for chppSendTimestampedRequestAndWait().
+#define DEFAULT_CLIENT_REQUEST_TIMEOUT_NS UINT64_C(5000000000)  // 5s
+
+// The default timeout to wait on discovery completion.
+#define CHPP_DISCOVERY_DEFAULT_TIMEOUT_MS UINT64_C(10000)  // 10s
 
 /************************************************
  *  Public functions
@@ -247,11 +255,20 @@ bool chppSendTimestampedRequestOrFail(struct ChppClientState *clientState,
  * @param len Datagram length in bytes.
  *
  * @return True informs the sender that the datagram was successfully enqueued.
- * False informs the sender that the queue was full and the payload discarded.
+ * False informs the sender that the payload was discarded because either the
+ * queue was full, or the request timed out.
  */
 bool chppSendTimestampedRequestAndWait(struct ChppClientState *clientState,
                                        struct ChppRequestResponseState *rRState,
                                        void *buf, size_t len);
+
+/**
+ * Same as chppSendTimestampedRequestAndWait() but with a specified timeout.
+ */
+bool chppSendTimestampedRequestAndWaitTimeout(
+    struct ChppClientState *clientState,
+    struct ChppRequestResponseState *rRState, void *buf, size_t len,
+    uint64_t timeoutNs);
 
 #ifdef __cplusplus
 }

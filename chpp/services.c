@@ -24,9 +24,16 @@
 #include "chpp/app.h"
 #include "chpp/memory.h"
 #include "chpp/platform/log.h"
+#ifdef CHPP_SERVICE_ENABLED_GNSS
 #include "chpp/services/gnss.h"
+#endif
+#ifdef CHPP_SERVICE_ENABLED_WIFI
 #include "chpp/services/wifi.h"
+#endif
+#ifdef CHPP_SERVICE_ENABLED_WWAN
 #include "chpp/services/wwan.h"
+#endif
+#include "chpp/time.h"
 #include "chpp/transport.h"
 
 /************************************************
@@ -34,30 +41,46 @@
  ***********************************************/
 
 void chppRegisterCommonServices(struct ChppAppState *context) {
+  UNUSED_VAR(context);
+
 #ifdef CHPP_SERVICE_ENABLED_WWAN
-  chppRegisterWwanService(context);
+  if (context->clientServiceSet.wwanService) {
+    chppRegisterWwanService(context);
+  }
 #endif
 
 #ifdef CHPP_SERVICE_ENABLED_WIFI
-  chppRegisterWifiService(context);
+  if (context->clientServiceSet.wifiService) {
+    chppRegisterWifiService(context);
+  }
 #endif
 
 #ifdef CHPP_SERVICE_ENABLED_GNSS
-  chppRegisterGnssService(context);
+  if (context->clientServiceSet.gnssService) {
+    chppRegisterGnssService(context);
+  }
 #endif
 }
 
 void chppDeregisterCommonServices(struct ChppAppState *context) {
+  UNUSED_VAR(context);
+
 #ifdef CHPP_SERVICE_ENABLED_WWAN
-  chppDeregisterWwanService(context);
+  if (context->clientServiceSet.wwanService) {
+    chppDeregisterWwanService(context);
+  }
 #endif
 
 #ifdef CHPP_SERVICE_ENABLED_WIFI
-  chppDeregisterWifiService(context);
+  if (context->clientServiceSet.wifiService) {
+    chppDeregisterWifiService(context);
+  }
 #endif
 
 #ifdef CHPP_SERVICE_ENABLED_GNSS
-  chppDeregisterGnssService(context);
+  if (context->clientServiceSet.gnssService) {
+    chppDeregisterGnssService(context);
+  }
 #endif
 }
 
@@ -79,9 +102,10 @@ uint8_t chppRegisterService(struct ChppAppState *appContext,
 
     char uuidText[CHPP_SERVICE_UUID_STRING_LEN];
     chppUuidToStr(newService->descriptor.uuid, uuidText);
-    CHPP_LOGI("Registered service # %" PRIu8 " on handle %" PRIu8
-              " with name=%s, UUID=%s, "
-              "version=%" PRIu8 ".%" PRIu8 ".%" PRIu16 ", min_len=%zu ",
+    CHPP_LOGI("Registered service # %" PRIu8
+              " on handle %d"
+              " with name=%s, UUID=%s, version=%" PRIu8 ".%" PRIu8 ".%" PRIu16
+              ", min_len=%" PRIuSIZE " ",
               appContext->registeredServiceCount,
               CHPP_SERVICE_HANDLE_OF_INDEX(appContext->registeredServiceCount),
               newService->descriptor.name, uuidText,
@@ -127,14 +151,14 @@ void chppServiceTimestampRequest(struct ChppRequestResponseState *rRState,
         "= %" PRIu64,
         rRState->requestTime);
   }
-  rRState->requestTime = chppGetCurrentTime();
+  rRState->requestTime = chppGetCurrentTimeNs();
   rRState->responseTime = CHPP_TIME_NONE;
   rRState->transaction = requestHeader->transaction;
 }
 
 void chppServiceTimestampResponse(struct ChppRequestResponseState *rRState) {
   uint64_t previousResponseTime = rRState->responseTime;
-  rRState->responseTime = chppGetCurrentTime();
+  rRState->responseTime = chppGetCurrentTimeNs();
 
   if (rRState->requestTime == CHPP_TIME_NONE) {
     CHPP_LOGE("Sending response at t = %" PRIu64

@@ -32,8 +32,8 @@
  *  Prototypes
  ***********************************************/
 
-static bool chppDispatchGnssRequest(void *serviceContext, uint8_t *buf,
-                                    size_t len);
+static enum ChppAppErrorCode chppDispatchGnssRequest(void *serviceContext,
+                                                     uint8_t *buf, size_t len);
 
 /************************************************
  *  Private Definitions
@@ -84,25 +84,6 @@ struct ChppGnssServiceState {
                                          // state
 };
 
-CHPP_PACKED_START
-
-//! Parameters for controlLocationSession
-// TODO: Replace with auto-generated parser function when available
-struct ChppGnssControlLocationSessionParameters {
-  bool enable;
-  uint32_t minIntervalMs;
-  uint32_t minTimeToNextFixMs;
-} CHPP_PACKED_ATTR;
-
-//! Parameters for controlMeasurementSession
-// TODO: Replace with auto-generated parser function when available
-struct ChppGnssControlMeasurementSessionParameters {
-  bool enable;
-  uint32_t minIntervalMs;
-} CHPP_PACKED_ATTR;
-
-CHPP_PACKED_END
-
 // Note: The CHRE PAL API only allows for one definition - see comment in WWAN
 // service for details.
 // Note: There is no notion of a cookie in the CHRE GNSS API so we need to use
@@ -113,25 +94,22 @@ struct ChppGnssServiceState gGnssServiceContext;
  *  Prototypes
  ***********************************************/
 
-static bool chppDispatchGnssRequest(void *serviceContext, uint8_t *buf,
-                                    size_t len);
-
-static void chppGnssServiceOpen(struct ChppGnssServiceState *gnssServiceContext,
-                                struct ChppAppHeader *requestHeader);
-static void chppGnssServiceClose(
+static enum ChppAppErrorCode chppGnssServiceOpen(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader);
-
-static void chppGnssServiceGetCapabilities(
+static enum ChppAppErrorCode chppGnssServiceClose(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader);
-static void chppGnssServiceControlLocationSession(
+static enum ChppAppErrorCode chppGnssServiceGetCapabilities(
+    struct ChppGnssServiceState *gnssServiceContext,
+    struct ChppAppHeader *requestHeader);
+static enum ChppAppErrorCode chppGnssServiceControlLocationSession(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader, uint8_t *buf, size_t len);
-static void chppGnssServiceControlMeasurementSession(
+static enum ChppAppErrorCode chppGnssServiceControlMeasurementSession(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader, uint8_t *buf, size_t len);
-static void chppGnssServiceConfigurePassiveLocationListener(
+static enum ChppAppErrorCode chppGnssServiceConfigurePassiveLocationListener(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader, uint8_t *buf, size_t len);
 
@@ -151,7 +129,8 @@ static void chppGnssServiceMeasurementEventCallback(
 
 /**
  * Dispatches a client request from the transport layer that is determined to be
- * for the GNSS service.
+ * for the GNSS service. If the result of the dispatch is an error, this
+ * function responds to the client with the same error.
  *
  * This function is called from the app layer using its function pointer given
  * during service registration.
@@ -160,69 +139,80 @@ static void chppGnssServiceMeasurementEventCallback(
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
  *
- * @return False indicates error (unknown command).
+ * @return Indicates the result of this function call.
  */
-static bool chppDispatchGnssRequest(void *serviceContext, uint8_t *buf,
-                                    size_t len) {
+static enum ChppAppErrorCode chppDispatchGnssRequest(void *serviceContext,
+                                                     uint8_t *buf, size_t len) {
   struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
   buf += sizeof(struct ChppAppHeader);
   len -= sizeof(struct ChppAppHeader);
 
   struct ChppGnssServiceState *gnssServiceContext =
       (struct ChppGnssServiceState *)serviceContext;
-  bool success = true;
+  struct ChppRequestResponseState *rRState;
+  enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
+  bool dispatched = true;
 
   switch (rxHeader->command) {
     case CHPP_GNSS_OPEN: {
-      chppServiceTimestampRequest(&gnssServiceContext->open, rxHeader);
-      chppGnssServiceOpen(gnssServiceContext, rxHeader);
+      rRState = &gnssServiceContext->open;
+      chppServiceTimestampRequest(rRState, rxHeader);
+      error = chppGnssServiceOpen(gnssServiceContext, rxHeader);
       break;
     }
 
     case CHPP_GNSS_CLOSE: {
-      chppServiceTimestampRequest(&gnssServiceContext->close, rxHeader);
-      chppGnssServiceClose(gnssServiceContext, rxHeader);
+      rRState = &gnssServiceContext->close;
+      chppServiceTimestampRequest(rRState, rxHeader);
+      error = chppGnssServiceClose(gnssServiceContext, rxHeader);
       break;
     }
 
     case CHPP_GNSS_GET_CAPABILITIES: {
-      chppServiceTimestampRequest(&gnssServiceContext->getCapabilities,
-                                  rxHeader);
-      chppGnssServiceGetCapabilities(gnssServiceContext, rxHeader);
+      rRState = &gnssServiceContext->getCapabilities;
+      chppServiceTimestampRequest(rRState, rxHeader);
+      error = chppGnssServiceGetCapabilities(gnssServiceContext, rxHeader);
       break;
     }
 
     case CHPP_GNSS_CONTROL_LOCATION_SESSION: {
-      chppServiceTimestampRequest(&gnssServiceContext->controlLocationSession,
-                                  rxHeader);
-      chppGnssServiceControlLocationSession(gnssServiceContext, rxHeader, buf,
-                                            len);
+      rRState = &gnssServiceContext->controlLocationSession;
+      chppServiceTimestampRequest(rRState, rxHeader);
+      error = chppGnssServiceControlLocationSession(gnssServiceContext,
+                                                    rxHeader, buf, len);
       break;
     }
 
     case CHPP_GNSS_CONTROL_MEASUREMENT_SESSION: {
-      chppServiceTimestampRequest(
-          &gnssServiceContext->controlMeasurementSession, rxHeader);
-      chppGnssServiceControlMeasurementSession(gnssServiceContext, rxHeader,
-                                               buf, len);
+      rRState = &gnssServiceContext->controlMeasurementSession;
+      chppServiceTimestampRequest(rRState, rxHeader);
+      error = chppGnssServiceControlMeasurementSession(gnssServiceContext,
+                                                       rxHeader, buf, len);
       break;
     }
 
     case CHPP_GNSS_CONFIGURE_PASSIVE_LOCATION_LISTENER: {
-      chppServiceTimestampRequest(
-          &gnssServiceContext->configurePassiveLocationListener, rxHeader);
-      chppGnssServiceConfigurePassiveLocationListener(gnssServiceContext,
-                                                      rxHeader, buf, len);
+      rRState = &gnssServiceContext->configurePassiveLocationListener;
+      chppServiceTimestampRequest(rRState, rxHeader);
+      error = chppGnssServiceConfigurePassiveLocationListener(
+          gnssServiceContext, rxHeader, buf, len);
       break;
     }
 
     default: {
-      success = false;
+      dispatched = false;
+      error = CHPP_APP_ERROR_INVALID_COMMAND;
       break;
     }
   }
 
-  return success;
+  if (dispatched == true && error != CHPP_APP_ERROR_NONE) {
+    // Request was dispatched but an error was returned. Close out
+    // chppServiceTimestampRequest()
+    chppServiceTimestampResponse(rRState);
+  }
+
+  return error;
 }
 
 /**
@@ -231,12 +221,13 @@ static bool chppDispatchGnssRequest(void *serviceContext, uint8_t *buf,
  *
  * @param serviceContext Maintains status for each service instance.
  * @param requestHeader App layer header of the request.
+ *
+ * @return Indicates the result of this function call.
  */
-static void chppGnssServiceOpen(struct ChppGnssServiceState *gnssServiceContext,
-                                struct ChppAppHeader *requestHeader) {
-  // TODO: Check for OOM here and elsewhere
-  struct ChppAppHeader *response =
-      chppAllocServiceResponseFixed(requestHeader, struct ChppAppHeader);
+static enum ChppAppErrorCode chppGnssServiceOpen(
+    struct ChppGnssServiceState *gnssServiceContext,
+    struct ChppAppHeader *requestHeader) {
+  enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
 
   static const struct chrePalGnssCallbacks palCallbacks = {
       .requestStateResync = chppGnssServiceRequestStateResyncCallback,
@@ -250,16 +241,26 @@ static void chppGnssServiceOpen(struct ChppGnssServiceState *gnssServiceContext,
 
   if (!gnssServiceContext->api->open(
           gnssServiceContext->service.appContext->systemApi, &palCallbacks)) {
-    CHPP_LOGE("GNSS PAL API initialization failed");
+    error = CHPP_APP_ERROR_UNSPECIFIED;
+    CHPP_LOGE("CHPP GNSS PAL API initialization failed");
     CHPP_DEBUG_ASSERT(false);
-    response->error = CHPP_APP_ERROR_UNSPECIFIED;
+
   } else {
-    response->error = CHPP_APP_ERROR_NONE;
+    CHPP_LOGI("CHPP GNSS service initialized");
+    struct ChppAppHeader *response =
+        chppAllocServiceResponseFixed(requestHeader, struct ChppAppHeader);
+
+    if (response == NULL) {
+      CHPP_LOG_OOM();
+      error = CHPP_APP_ERROR_OOM;
+    } else {
+      chppSendTimestampedResponseOrFail(&gnssServiceContext->service,
+                                        &gnssServiceContext->open, response,
+                                        sizeof(*response));
+    }
   }
 
-  chppSendTimestampedResponseOrFail(&gnssServiceContext->service,
-                                    &gnssServiceContext->open, response,
-                                    sizeof(*response));
+  return error;
 }
 
 /**
@@ -267,19 +268,30 @@ static void chppGnssServiceOpen(struct ChppGnssServiceState *gnssServiceContext,
  *
  * @param serviceContext Maintains status for each service instance.
  * @param requestHeader App layer header of the request.
+ *
+ * @return Indicates the result of this function call.
  */
-static void chppGnssServiceClose(
+static enum ChppAppErrorCode chppGnssServiceClose(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader) {
+  enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
+
+  gnssServiceContext->api->close();
+  CHPP_LOGI("CHPP GNSS service deinitialized");
+
   struct ChppAppHeader *response =
       chppAllocServiceResponseFixed(requestHeader, struct ChppAppHeader);
 
-  gnssServiceContext->api->close();
+  if (response == NULL) {
+    CHPP_LOG_OOM();
+    error = CHPP_APP_ERROR_OOM;
+  } else {
+    chppSendTimestampedResponseOrFail(&gnssServiceContext->service,
+                                      &gnssServiceContext->close, response,
+                                      sizeof(*response));
+  }
 
-  response->error = CHPP_APP_ERROR_NONE;
-  chppSendTimestampedResponseOrFail(&gnssServiceContext->service,
-                                    &gnssServiceContext->close, response,
-                                    sizeof(*response));
+  return error;
 }
 
 /**
@@ -288,23 +300,33 @@ static void chppGnssServiceClose(
  *
  * @param serviceContext Maintains status for each service instance.
  * @param requestHeader App layer header of the request.
+ *
+ * @return Indicates the result of this function call.
  */
-static void chppGnssServiceGetCapabilities(
+static enum ChppAppErrorCode chppGnssServiceGetCapabilities(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader) {
+  enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
+
   struct ChppGnssGetCapabilitiesResponse *response =
       chppAllocServiceResponseFixed(requestHeader,
                                     struct ChppGnssGetCapabilitiesResponse);
 
-  response->capabilities = gnssServiceContext->api->getCapabilities();
-  response->header.error = CHPP_APP_ERROR_NONE;
+  if (response == NULL) {
+    CHPP_LOG_OOM();
+    error = CHPP_APP_ERROR_OOM;
+  } else {
+    response->params.capabilities = gnssServiceContext->api->getCapabilities();
 
-  CHPP_LOGD("chppGnssServiceGetCapabilities returning %" PRIx32 ", %zu bytes",
-            response->capabilities, sizeof(*response));
+    CHPP_LOGD("chppGnssServiceGetCapabilities returning 0x%" PRIx32
+              ", %" PRIuSIZE " bytes",
+              response->params.capabilities, sizeof(*response));
+    chppSendTimestampedResponseOrFail(&gnssServiceContext->service,
+                                      &gnssServiceContext->getCapabilities,
+                                      response, sizeof(*response));
+  }
 
-  chppSendTimestampedResponseOrFail(&gnssServiceContext->service,
-                                    &gnssServiceContext->getCapabilities,
-                                    response, sizeof(*response));
+  return error;
 }
 
 /**
@@ -318,10 +340,13 @@ static void chppGnssServiceGetCapabilities(
  * @param requestHeader App layer header of the request.
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
+ *
+ * @return Indicates the result of this function call.
  */
-static void chppGnssServiceControlLocationSession(
+static enum ChppAppErrorCode chppGnssServiceControlLocationSession(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader, uint8_t *buf, size_t len) {
+  UNUSED_VAR(requestHeader);
   enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
 
   if (len < sizeof(struct ChppGnssControlLocationSessionParameters)) {
@@ -338,17 +363,7 @@ static void chppGnssServiceControlLocationSession(
     }
   }
 
-  // TODO: Consolidate to avoid duplication
-  if (error != CHPP_APP_ERROR_NONE) {
-    // Error occurred, send a synchronous error response
-    struct ChppAppHeader *response =
-        chppAllocServiceResponseFixed(requestHeader, struct ChppAppHeader);
-    response->error = error;
-    chppSendTimestampedResponseOrFail(
-        &gnssServiceContext->service,
-        &gnssServiceContext->controlLocationSession, response,
-        sizeof(*response));
-  }
+  return error;
 }
 
 /**
@@ -362,10 +377,13 @@ static void chppGnssServiceControlLocationSession(
  * @param requestHeader App layer header of the request.
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
+ *
+ * @return Indicates the result of this function call.
  */
-static void chppGnssServiceControlMeasurementSession(
+static enum ChppAppErrorCode chppGnssServiceControlMeasurementSession(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader, uint8_t *buf, size_t len) {
+  UNUSED_VAR(requestHeader);
   enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
 
   if (len < sizeof(struct ChppGnssControlMeasurementSessionParameters)) {
@@ -381,17 +399,7 @@ static void chppGnssServiceControlMeasurementSession(
     }
   }
 
-  // TODO: Consolidate to avoid duplication
-  if (error != CHPP_APP_ERROR_NONE) {
-    // Error occurred, send a synchronous error response
-    struct ChppAppHeader *response =
-        chppAllocServiceResponseFixed(requestHeader, struct ChppAppHeader);
-    response->error = error;
-    chppSendTimestampedResponseOrFail(
-        &gnssServiceContext->service,
-        &gnssServiceContext->controlMeasurementSession, response,
-        sizeof(*response));
-  }
+  return error;
 }
 
 /**
@@ -406,32 +414,28 @@ static void chppGnssServiceControlMeasurementSession(
  * @param requestHeader App layer header of the request.
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
+ *
+ * @return Indicates the result of this function call.
  */
-static void chppGnssServiceConfigurePassiveLocationListener(
+static enum ChppAppErrorCode chppGnssServiceConfigurePassiveLocationListener(
     struct ChppGnssServiceState *gnssServiceContext,
     struct ChppAppHeader *requestHeader, uint8_t *buf, size_t len) {
+  UNUSED_VAR(requestHeader);
   enum ChppAppErrorCode error = CHPP_APP_ERROR_NONE;
 
-  if (len < sizeof(bool)) {
+  if (len < sizeof(struct ChppGnssConfigurePassiveLocationListenerParameters)) {
     error = CHPP_APP_ERROR_INVALID_ARG;
   } else {
-    bool *enable = (bool *)buf;
-    if (!gnssServiceContext->api->configurePassiveLocationListener(*enable)) {
+    struct ChppGnssConfigurePassiveLocationListenerParameters *parameters =
+        (struct ChppGnssConfigurePassiveLocationListenerParameters *)buf;
+
+    if (!gnssServiceContext->api->configurePassiveLocationListener(
+            parameters->enable)) {
       error = CHPP_APP_ERROR_UNSPECIFIED;
     }
   }
 
-  // TODO: Consolidate to avoid duplication
-  if (error != CHPP_APP_ERROR_NONE) {
-    // Error occurred, send a synchronous error response
-    struct ChppAppHeader *response =
-        chppAllocServiceResponseFixed(requestHeader, struct ChppAppHeader);
-    response->error = error;
-    chppSendTimestampedResponseOrFail(
-        &gnssServiceContext->service,
-        &gnssServiceContext->configurePassiveLocationListener, response,
-        sizeof(*response));
-  }
+  return error;
 }
 
 /**
@@ -559,7 +563,7 @@ static void chppGnssServiceMeasurementEventCallback(
   size_t notificationLen;
   if (!chppGnssDataEventFromChre(event, &notification, &notificationLen)) {
     CHPP_LOGE(
-        "chppGnssMeasurementEventFromChre failed (OOM?). Transaction ID = "
+        "chppGnssDataEventFromChre failed (OOM?). Transaction ID = "
         "%" PRIu8,
         gGnssServiceContext.controlMeasurementSession.transaction);
     // TODO: consider sending an error response if this fails

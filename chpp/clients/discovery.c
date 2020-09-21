@@ -34,9 +34,9 @@
 
 static inline bool chppIsClientCompatibleWithService(
     const struct ChppClientDescriptor *client,
-    struct ChppServiceDescriptor *service);
-static uint8_t chppFindMatchingClient(struct ChppAppState *context,
-                                      struct ChppServiceDescriptor *service);
+    const struct ChppServiceDescriptor *service);
+static uint8_t chppFindMatchingClient(
+    struct ChppAppState *context, const struct ChppServiceDescriptor *service);
 static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
                                             const uint8_t *buf, size_t len);
 
@@ -57,7 +57,7 @@ static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
  */
 static inline bool chppIsClientCompatibleWithService(
     const struct ChppClientDescriptor *client,
-    struct ChppServiceDescriptor *service) {
+    const struct ChppServiceDescriptor *service) {
   return (memcmp(client->uuid, service->uuid, CHPP_SERVICE_UUID_LEN) == 0 &&
           client->version.major == service->version.major);
 }
@@ -72,8 +72,8 @@ static inline bool chppIsClientCompatibleWithService(
  * @param return Index of client matching the service, or CHPP_CLIENT_INDEX_NONE
  * if there is none.
  */
-static uint8_t chppFindMatchingClient(struct ChppAppState *context,
-                                      struct ChppServiceDescriptor *service) {
+static uint8_t chppFindMatchingClient(
+    struct ChppAppState *context, const struct ChppServiceDescriptor *service) {
   uint8_t result = CHPP_CLIENT_INDEX_NONE;
 
   for (size_t i = 0; i < context->registeredClientCount; i++) {
@@ -99,22 +99,23 @@ static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
                                             const uint8_t *buf, size_t len) {
   CHPP_DEBUG_ASSERT(len >= sizeof(struct ChppAppHeader));
 
-  struct ChppDiscoveryResponse *response = (struct ChppDiscoveryResponse *)buf;
+  const struct ChppDiscoveryResponse *response =
+      (struct ChppDiscoveryResponse *)buf;
   size_t servicesLen = len - sizeof(struct ChppAppHeader);
   uint8_t serviceCount = servicesLen / sizeof(struct ChppServiceDescriptor);
 
   if (servicesLen != serviceCount * sizeof(struct ChppServiceDescriptor)) {
     // Incomplete service list
-    CHPP_LOGE(
-        "Service descriptors length length=%zu is invalid for a service count "
-        "= %" PRIu8 " and descriptor length = %zu",
-        servicesLen, serviceCount, sizeof(struct ChppServiceDescriptor));
+    CHPP_LOGE("Service descriptors length length=%" PRIuSIZE
+              " is invalid for a service count = %" PRIu8
+              " and descriptor length = %" PRIuSIZE,
+              servicesLen, serviceCount, sizeof(struct ChppServiceDescriptor));
     CHPP_DEBUG_ASSERT(false);
   }
 
   if (serviceCount >= CHPP_MAX_DISCOVERED_SERVICES) {
     CHPP_LOGE("Discovered service count = %" PRIu8
-              " larger than CHPP_MAX_DISCOVERED_SERVICES = %" PRIu8,
+              " larger than CHPP_MAX_DISCOVERED_SERVICES = %d",
               serviceCount, CHPP_MAX_DISCOVERED_SERVICES);
     CHPP_DEBUG_ASSERT(false);
   }
@@ -134,17 +135,18 @@ static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
     chppUuidToStr(response->services[i].uuid, uuidText);
 
     if (context->clientIndexOfServiceIndex[i] == CHPP_CLIENT_INDEX_NONE) {
-      CHPP_LOGI("No matching client found for service on handle %" PRIu8
-                " with name=%s, UUID=%s, version=%" PRIu8 ".%" PRIu8
-                ".%" PRIu16,
-                CHPP_SERVICE_HANDLE_OF_INDEX(i), response->services[i].name,
-                uuidText, response->services[i].version.major,
-                response->services[i].version.minor,
-                response->services[i].version.patch);
+      CHPP_LOGI(
+          "No matching client found for service on handle %d"
+          " with name=%s, UUID=%s, version=%" PRIu8 ".%" PRIu8 ".%" PRIu16,
+          CHPP_SERVICE_HANDLE_OF_INDEX(i), response->services[i].name, uuidText,
+          response->services[i].version.major,
+          response->services[i].version.minor,
+          response->services[i].version.patch);
 
     } else {
       CHPP_LOGI(
-          "Client # %" PRIu8 " matched to service on handle %" PRIu8
+          "Client # %" PRIu8
+          " matched to service on handle %d"
           " with name=%s, UUID=%s. "
           "client version=%" PRIu8 ".%" PRIu8 ".%" PRIu16
           ", service version=%" PRIu8 ".%" PRIu8 ".%" PRIu16,
@@ -161,8 +163,10 @@ static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
           response->services[i].version.patch);
 
       // Initialize client
-      if (context->registeredClients[0]->initFunctionPtr(
-              context, CHPP_SERVICE_HANDLE_OF_INDEX(i),
+      uint8_t idx = context->clientIndexOfServiceIndex[i];
+      if (context->registeredClients[idx]->initFunctionPtr(
+              context->registeredClientContexts[idx],
+              CHPP_SERVICE_HANDLE_OF_INDEX(i),
               response->services[i].version) == false) {
         CHPP_LOGE(
             "Client rejected initialization (maybe due to incompatible "
@@ -187,11 +191,47 @@ static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
             " clients with services, out of a total of %" PRIu8
             " registered clients and %" PRIu8 " discovered services",
             matchedClients, context->registeredClientCount, serviceCount);
+
+  // Notify (possible) waiting client on discovery completion.
+  chppMutexLock(&context->discoveryMutex);
+  context->isDiscoveryComplete = true;
+  chppConditionVariableSignal(&context->discoveryCv);
+  chppMutexUnlock(&context->discoveryMutex);
 }
 
 /************************************************
  *  Public Functions
  ***********************************************/
+
+void chppDiscoveryInit(struct ChppAppState *context) {
+  if (!context->isDiscoveryClientInitialized) {
+    chppMutexInit(&context->discoveryMutex);
+    chppConditionVariableInit(&context->discoveryCv);
+    context->isDiscoveryComplete = false;
+    context->isDiscoveryClientInitialized = true;
+  }
+}
+
+void chppDiscoveryDeinit(struct ChppAppState *context) {
+  chppConditionVariableDeinit(&context->discoveryCv);
+  chppMutexDeinit(&context->discoveryMutex);
+  context->isDiscoveryClientInitialized = false;
+}
+
+bool chppWaitForDiscoveryComplete(struct ChppAppState *context,
+                                  uint64_t timeoutMs) {
+  bool success = true;
+  chppMutexLock(&context->discoveryMutex);
+
+  while (success && !context->isDiscoveryComplete) {
+    success = chppConditionVariableTimedWait(&context->discoveryCv,
+                                             &context->discoveryMutex,
+                                             timeoutMs * CHPP_NSEC_PER_MSEC);
+  }
+
+  chppMutexUnlock(&context->discoveryMutex);
+  return success;
+}
 
 bool chppDispatchDiscoveryServiceResponse(struct ChppAppState *context,
                                           const uint8_t *buf, size_t len) {
@@ -220,6 +260,10 @@ void chppInitiateDiscovery(struct ChppAppState *context) {
   request->handle = CHPP_HANDLE_DISCOVERY;
   request->type = CHPP_MESSAGE_TYPE_CLIENT_REQUEST;
   request->command = CHPP_DISCOVERY_COMMAND_DISCOVER_ALL;
+
+  chppMutexLock(&context->discoveryMutex);
+  context->isDiscoveryComplete = false;
+  chppMutexUnlock(&context->discoveryMutex);
 
   chppEnqueueTxDatagramOrFail(context->transportContext, request,
                               sizeof(struct ChppAppHeader));

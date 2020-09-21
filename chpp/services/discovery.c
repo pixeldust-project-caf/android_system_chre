@@ -56,7 +56,7 @@ static void chppDiscoveryDiscoverAll(
       context->registeredServiceCount, services);
 
   if (response == NULL) {
-    CHPP_LOG_OOM("DiscoverAll response of %zu bytes", responseLen);
+    CHPP_LOG_OOM("DiscoverAll response of %" PRIuSIZE " bytes", responseLen);
     CHPP_ASSERT(false);
 
   } else {
@@ -80,7 +80,7 @@ static void chppDiscoveryDiscoverAll(
 bool chppDispatchDiscoveryClientRequest(struct ChppAppState *context,
                                         const uint8_t *buf, size_t len) {
   UNUSED_VAR(len);
-  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+  const struct ChppAppHeader *rxHeader = (const struct ChppAppHeader *)buf;
   bool success = true;
 
   switch (rxHeader->command) {

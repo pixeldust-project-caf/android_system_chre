@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "chpp/condition_variable.h"
 #include "chpp/macros.h"
 #include "chpp/transport.h"
 
@@ -88,7 +89,10 @@ enum ChppHandleNumber {
  * Message Types as used in ChppAppHeader
  */
 #define CHPP_APP_MASK_MESSAGE_TYPE LEAST_SIGNIFICANT_NIBBLE
-#define CHPP_APP_GET_MESSAGE_TYPE(value) ((value)&CHPP_APP_MASK_MESSAGE_TYPE)
+#define CHPP_APP_GET_MESSAGE_TYPE(value) \
+  ((enum ChppMessageType)(               \
+      (value)&CHPP_APP_MASK_MESSAGE_TYPE))  // TODO: Consider checking if this
+                                            // maps into a valid enum
 enum ChppMessageType {
   //! Request from client. Needs response from service.
   CHPP_MESSAGE_TYPE_CLIENT_REQUEST = 0,
@@ -128,6 +132,8 @@ enum ChppAppErrorCode {
   CHPP_APP_ERROR_RATELIMITED = 8,
   //! Function in use / blocked by another entity (e.g. the AP)
   CHPP_APP_ERROR_BLOCKED = 9,
+  //! Invalid length
+  CHPP_APP_ERROR_INVALID_LENGTH = 10,
   //! Unspecified failure
   CHPP_APP_ERROR_UNSPECIFIED = 255
 };
@@ -140,8 +146,8 @@ struct ChppAppHeader {
   //! Service Handle
   uint8_t handle;
 
-  //! MS nibble: Rserved
-  //! LS nibble: Message Type from enum ChppMessageType
+  //! Most significant nibble (MSN): Reserved
+  //! Least significant nibble (LSN): Message Type from enum ChppMessageType
   uint8_t type;
 
   //! Transaction ID
@@ -156,10 +162,14 @@ struct ChppAppHeader {
 } CHPP_PACKED_ATTR;
 CHPP_PACKED_END
 
+//! Minimum length of a header that includes upto the transaction ID
+#define CHPP_APP_MIN_LEN_HEADER_WITH_TRANSACTION (3 * sizeof(uint8_t))
+
 /**
  * Function type that dispatches incoming datagrams for any client or service
  */
-typedef bool(ChppDispatchFunction)(void *context, uint8_t *buf, size_t len);
+typedef enum ChppAppErrorCode(ChppDispatchFunction)(void *context, uint8_t *buf,
+                                                    size_t len);
 
 /**
  * Function type that initializes a client and assigns it its handle number
@@ -276,6 +286,16 @@ struct ChppRequestResponseState {
   uint8_t transaction;    // Transaction ID for the last request/response
 };
 
+struct ChppClientServiceSet {
+  bool wifiService : 1;
+  bool gnssService : 1;
+  bool wwanService : 1;
+  bool wifiClient : 1;
+  bool gnssClient : 1;
+  bool wwanClient : 1;
+  bool loopbackClient : 1;
+};
+
 struct ChppAppState {
   struct ChppTransportState *transportContext;  // Pointing to transport context
 
@@ -295,6 +315,16 @@ struct ChppAppState {
 
   uint8_t
       clientIndexOfServiceIndex[CHPP_MAX_DISCOVERED_SERVICES];  // Lookup table
+
+  struct ChppClientServiceSet clientServiceSet;  // Enabled client/services
+
+#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
+  // For discovery clients
+  bool isDiscoveryClientInitialized;
+  bool isDiscoveryComplete;
+  struct ChppMutex discoveryMutex;
+  struct ChppConditionVariable discoveryCv;
+#endif  // CHPP_CLIENT_ENABLED_DISCOVERY
 };
 
 #define CHPP_SERVICE_INDEX_OF_HANDLE(handle) \
@@ -320,12 +350,28 @@ void chppAppInit(struct ChppAppState *appContext,
                  struct ChppTransportState *transportContext);
 
 /**
+ * Same as chppAppInit(), but specifies the client/service endpoints to be
+ * enabled.
+ */
+void chppAppInitWithClientServiceSet(
+    struct ChppAppState *appContext,
+    struct ChppTransportState *transportContext,
+    struct ChppClientServiceSet clientServiceSet);
+
+/**
  * Deinitializes the CHPP app layer for e.g. clean shutdown.
  *
  * @param appContext A non-null pointer to ChppAppState initialized previously
  * in chppAppInit().
  */
 void chppAppDeinit(struct ChppAppState *appContext);
+
+/**
+ * Same as chppAppDeinit(), but to be invoked when the deinitialization is
+ * temporary (e.g. during a CHPP reset), distinguishing complete vs temporary
+ * shutdown.
+ */
+void chppAppDeinitTransient(struct ChppAppState *appContext);
 
 /*
  * Processes an Rx Datagram from the transport layer.

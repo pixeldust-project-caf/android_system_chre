@@ -22,10 +22,22 @@
 #include <stdint.h>
 
 #include "chpp/app.h"
+#ifdef CHPP_CLIENT_ENABLED_GNSS
+#include "chpp/clients/gnss.h"
+#endif
+#ifdef CHPP_CLIENT_ENABLED_LOOPBACK
+#include "chpp/clients/loopback.h"
+#endif
+#ifdef CHPP_CLIENT_ENABLED_WIFI
+#include "chpp/clients/wifi.h"
+#endif
+#ifdef CHPP_CLIENT_ENABLED_WWAN
 #include "chpp/clients/wwan.h"
+#endif
 #include "chpp/macros.h"
 #include "chpp/memory.h"
 #include "chpp/platform/log.h"
+#include "chpp/time.h"
 #include "chpp/transport.h"
 
 /************************************************
@@ -43,41 +55,68 @@
 void chppRegisterCommonClients(struct ChppAppState *context) {
   UNUSED_VAR(context);
 
+#ifdef CHPP_CLIENT_ENABLED_LOOPBACK
+  if (context->clientServiceSet.loopbackClient) {
+    chppLoopbackClientInit(context);
+  }
+#endif
+
 #ifdef CHPP_CLIENT_ENABLED_WWAN
-  chppRegisterWwanClient(context);
+  if (context->clientServiceSet.wwanClient) {
+    chppRegisterWwanClient(context);
+  }
 #endif
 
 #ifdef CHPP_CLIENT_ENABLED_WIFI
-  chppRegisterWifiClient(context);
+  if (context->clientServiceSet.wifiClient) {
+    chppRegisterWifiClient(context);
+  }
 #endif
 
 #ifdef CHPP_CLIENT_ENABLED_GNSS
-  chppRegisterGnssClient(context);
+  if (context->clientServiceSet.gnssClient) {
+    chppRegisterGnssClient(context);
+  }
 #endif
 }
 
 void chppDeregisterCommonClients(struct ChppAppState *context) {
   UNUSED_VAR(context);
+
+#ifdef CHPP_CLIENT_ENABLED_LOOPBACK
+  if (context->clientServiceSet.loopbackClient) {
+    chppLoopbackClientDeinit();
+  }
+#endif
+
 #ifdef CHPP_CLIENT_ENABLED_WWAN
-  chppDeregisterWwanClient(context);
+  if (context->clientServiceSet.wwanClient) {
+    chppDeregisterWwanClient(context);
+  }
 #endif
 
 #ifdef CHPP_CLIENT_ENABLED_WIFI
-  chppDeregisterWifiClient(context);
+  if (context->clientServiceSet.wifiClient) {
+    chppDeregisterWifiClient(context);
+  }
 #endif
 
 #ifdef CHPP_CLIENT_ENABLED_GNSS
-  chppDeregisterGnssClient(context);
+  if (context->clientServiceSet.gnssClient) {
+    chppDeregisterGnssClient(context);
+  }
 #endif
 }
 
 void chppClientInit(struct ChppClientState *clientContext, uint8_t handle) {
   clientContext->handle = handle;
-  chppNotifierInit(&clientContext->responseNotifier);
+  chppMutexInit(&clientContext->responseMutex);
+  chppConditionVariableInit(&clientContext->responseCondVar);
 }
 
 void chppClientDeinit(struct ChppClientState *clientContext) {
-  chppNotifierDeinit(&clientContext->responseNotifier);
+  chppConditionVariableDeinit(&clientContext->responseCondVar);
+  chppMutexDeinit(&clientContext->responseMutex);
 }
 
 void chppRegisterClient(struct ChppAppState *appContext, void *clientContext,
@@ -97,7 +136,7 @@ void chppRegisterClient(struct ChppAppState *appContext, void *clientContext,
     char uuidText[CHPP_SERVICE_UUID_STRING_LEN];
     chppUuidToStr(newClient->descriptor.uuid, uuidText);
     CHPP_LOGI("Registered client # %" PRIu8 " with UUID=%s, version=%" PRIu8
-              ".%" PRIu8 ".%" PRIu16 ", min_len=%zu ",
+              ".%" PRIu8 ".%" PRIu16 ", min_len=%" PRIuSIZE,
               appContext->registeredClientCount, uuidText,
               newClient->descriptor.version.major,
               newClient->descriptor.version.minor,
@@ -109,7 +148,7 @@ void chppRegisterClient(struct ChppAppState *appContext, void *clientContext,
 
 struct ChppAppHeader *chppAllocClientRequest(
     struct ChppClientState *clientState, size_t len) {
-  CHPP_ASSERT(len >= sizeof(struct ChppAppHeader));
+  CHPP_ASSERT(len >= CHPP_APP_MIN_LEN_HEADER_WITH_TRANSACTION);
 
   struct ChppAppHeader *result = chppMalloc(len);
   if (result != NULL) {
@@ -137,13 +176,13 @@ void chppClientTimestampRequest(struct ChppRequestResponseState *rRState,
                                 struct ChppAppHeader *requestHeader) {
   if (rRState->responseTime == CHPP_TIME_NONE &&
       rRState->requestTime != CHPP_TIME_NONE) {
-    CHPP_LOGE("Sending duplicate request with transaction ID = %" PRIu64
+    CHPP_LOGE("Sending duplicate request with transaction ID = %" PRIu8
               " while prior request with transaction ID = %" PRIu8
-              " was outstanding from t = %" PRIu8,
-              rRState->requestTime, requestHeader->transaction,
-              rRState->transaction);
+              " was outstanding from t = %" PRIu64,
+              requestHeader->transaction, rRState->transaction,
+              rRState->requestTime);
   }
-  rRState->requestTime = chppGetCurrentTime();
+  rRState->requestTime = chppGetCurrentTimeNs();
   rRState->responseTime = CHPP_TIME_NONE;
   rRState->transaction = requestHeader->transaction;
 }
@@ -151,7 +190,7 @@ void chppClientTimestampRequest(struct ChppRequestResponseState *rRState,
 bool chppClientTimestampResponse(struct ChppRequestResponseState *rRState,
                                  struct ChppAppHeader *responseHeader) {
   uint64_t previousResponseTime = rRState->responseTime;
-  rRState->responseTime = chppGetCurrentTime();
+  rRState->responseTime = chppGetCurrentTimeNs();
 
   if (rRState->requestTime == CHPP_TIME_NONE) {
     CHPP_LOGE("Received response at t = %" PRIu64
@@ -159,7 +198,7 @@ bool chppClientTimestampResponse(struct ChppRequestResponseState *rRState,
               rRState->responseTime);
 
   } else if (previousResponseTime != CHPP_TIME_NONE) {
-    rRState->responseTime = chppGetCurrentTime();
+    rRState->responseTime = chppGetCurrentTimeNs();
     CHPP_LOGW("Received additional response at t = %" PRIu64
               " for request at t = %" PRIu64 " (RTT = %" PRIu64 ")",
               rRState->responseTime, rRState->responseTime,
@@ -188,7 +227,7 @@ bool chppClientTimestampResponse(struct ChppRequestResponseState *rRState,
 bool chppSendTimestampedRequestOrFail(struct ChppClientState *clientState,
                                       struct ChppRequestResponseState *rRState,
                                       void *buf, size_t len) {
-  CHPP_ASSERT(len >= sizeof(struct ChppAppHeader));
+  CHPP_ASSERT(len >= CHPP_APP_MIN_LEN_HEADER_WITH_TRANSACTION);
   chppClientTimestampRequest(rRState, buf);
   return chppEnqueueTxDatagramOrFail(clientState->appContext->transportContext,
                                      buf, len);
@@ -197,15 +236,33 @@ bool chppSendTimestampedRequestOrFail(struct ChppClientState *clientState,
 bool chppSendTimestampedRequestAndWait(struct ChppClientState *clientState,
                                        struct ChppRequestResponseState *rRState,
                                        void *buf, size_t len) {
-  clientState->waitingForResponse = true;
+  return chppSendTimestampedRequestAndWaitTimeout(
+      clientState, rRState, buf, len, DEFAULT_CLIENT_REQUEST_TIMEOUT_NS);
+}
+
+bool chppSendTimestampedRequestAndWaitTimeout(
+    struct ChppClientState *clientState,
+    struct ChppRequestResponseState *rRState, void *buf, size_t len,
+    uint64_t timeoutNs) {
+  chppMutexLock(&clientState->responseMutex);
 
   bool result =
       chppSendTimestampedRequestOrFail(clientState, rRState, buf, len);
   if (result) {
-    chppNotifierWait(&clientState->responseNotifier);  // TODO: Add timeout
+    clientState->responseReady = false;
+    while (result && !clientState->responseReady) {
+      result = chppConditionVariableTimedWait(&clientState->responseCondVar,
+                                              &clientState->responseMutex,
+                                              timeoutNs);
+    }
+    if (!clientState->responseReady) {
+      CHPP_LOGE("Timeout waiting on service response after %" PRIu64 " ms",
+                timeoutNs / CHPP_NSEC_PER_MSEC);
+      result = false;
+    }
   }
 
-  clientState->waitingForResponse = false;
+  chppMutexUnlock(&clientState->responseMutex);
 
   return result;
 }

@@ -85,6 +85,7 @@ SLPI_SRCS += platform/shared/memory_manager.cc
 SLPI_SRCS += platform/shared/nanoapp_load_manager.cc
 SLPI_SRCS += platform/shared/nanoapp/nanoapp_dso_util.cc
 SLPI_SRCS += platform/shared/pal_system_api.cc
+SLPI_SRCS += platform/shared/pw_tokenized_log.cc
 SLPI_SRCS += platform/shared/system_time.cc
 SLPI_SRCS += platform/slpi/chre_api_re.cc
 SLPI_SRCS += platform/slpi/fatal_error.cc
@@ -122,12 +123,11 @@ endif
 
 # SLPI/SEE-specific Source Files ###############################################
 
+# Optional sensors support.
+ifeq ($(CHRE_SENSORS_SUPPORT_ENABLED), true)
 SLPI_SEE_SRCS += platform/slpi/see/platform_sensor.cc
 SLPI_SEE_SRCS += platform/slpi/see/platform_sensor_manager.cc
-SLPI_SEE_SRCS += platform/slpi/see/power_control_manager.cc
-
 ifneq ($(IMPORT_CHRE_UTILS), true)
-SLPI_SEE_SRCS += platform/slpi/see/island_vote_client.cc
 SLPI_SEE_SRCS += platform/slpi/see/see_cal_helper.cc
 SLPI_SEE_SRCS += platform/slpi/see/see_helper.cc
 endif
@@ -145,6 +145,13 @@ SLPI_SEE_SRCS += $(SLPI_PREFIX)/ssc_api/pb/sns_std_type.pb.c
 
 SLPI_SEE_QSK_SRCS += $(SLPI_PREFIX)/chre/chre/src/system/chre/platform/slpi/sns_qmi_client_alt.c
 SLPI_SEE_QMI_SRCS += $(SLPI_PREFIX)/chre/chre/src/system/chre/platform/slpi/sns_qmi_client.c
+endif
+
+SLPI_SEE_SRCS += platform/slpi/see/power_control_manager.cc
+
+ifneq ($(IMPORT_CHRE_UTILS), true)
+SLPI_SEE_SRCS += platform/slpi/see/island_vote_client.cc
+endif
 
 # Simulator-specific Compiler Flags ############################################
 
@@ -185,19 +192,19 @@ SIM_SRCS += platform/shared/system_time.cc
 
 # Optional GNSS support.
 ifeq ($(CHRE_GNSS_SUPPORT_ENABLED), true)
-SIM_SRCS += platform/shared/pal_gnss_stub.cc
+SIM_SRCS += platform/linux/pal_gnss.cc
 SIM_SRCS += platform/shared/platform_gnss.cc
 endif
 
 # Optional Wi-Fi support.
 ifeq ($(CHRE_WIFI_SUPPORT_ENABLED), true)
-SIM_SRCS += platform/shared/pal_wifi_stub.cc
+SIM_SRCS += platform/linux/pal_wifi.cc
 SIM_SRCS += platform/shared/platform_wifi.cc
 endif
 
 # Optional WWAN support.
 ifeq ($(CHRE_WWAN_SUPPORT_ENABLED), true)
-SIM_SRCS += platform/shared/pal_wwan_stub.cc
+SIM_SRCS += platform/linux/pal_wwan.cc
 SIM_SRCS += platform/shared/platform_wwan.cc
 endif
 

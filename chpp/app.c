@@ -25,6 +25,9 @@
 
 #include "chpp/clients.h"
 #include "chpp/clients/discovery.h"
+#ifdef CHPP_CLIENT_ENABLED_LOOPBACK
+#include "chpp/clients/loopback.h"
+#endif
 #include "chpp/macros.h"
 #include "chpp/notifier.h"
 #include "chpp/pal_api.h"
@@ -33,9 +36,6 @@
 #include "chpp/services/discovery.h"
 #include "chpp/services/loopback.h"
 #include "chpp/services/nonhandle.h"
-
-//! Signals to use in ChppNotifier in this program.
-#define CHPP_SIGNAL_CLIENT_EVENT UINT32_C(1 << 0)
 
 /************************************************
  *  Prototypes
@@ -49,8 +49,9 @@ static bool chppProcessPredefinedClientNotification(
     struct ChppAppState *context, uint8_t *buf, size_t len);
 static bool chppProcessPredefinedServiceNotification(
     struct ChppAppState *context, uint8_t *buf, size_t len);
-static bool chppDatagramLenIsOk(struct ChppAppState *context, uint8_t handle,
-                                size_t len);
+
+static bool chppDatagramLenIsOk(struct ChppAppState *context,
+                                struct ChppAppHeader *rxHeader, size_t len);
 ChppDispatchFunction *chppGetDispatchFunction(struct ChppAppState *context,
                                               uint8_t handle,
                                               enum ChppMessageType type);
@@ -66,6 +67,11 @@ static void *chppClientServiceContextOfHandle(struct ChppAppState *appContext,
                                               uint8_t handle,
                                               enum ChppMessageType type);
 
+static void chppProcessPredefinedHandleDatagram(struct ChppAppState *context,
+                                                uint8_t *buf, size_t len);
+static void chppProcessNegotiatedHandleDatagram(struct ChppAppState *context,
+                                                uint8_t *buf, size_t len);
+
 /************************************************
  *  Private Functions
  ***********************************************/
@@ -78,7 +84,7 @@ static void *chppClientServiceContextOfHandle(struct ChppAppState *appContext,
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
  *
- * @return False if handle is invalid. True otherwise
+ * @return False if handle is invalid. True otherwise.
  */
 static bool chppProcessPredefinedClientRequest(struct ChppAppState *context,
                                                uint8_t *buf, size_t len) {
@@ -103,11 +109,10 @@ static bool chppProcessPredefinedClientRequest(struct ChppAppState *context,
   }
 
   if (dispatchResult == false) {
-    CHPP_LOGE(
-        "Handle = %" PRIu8
-        " received unknown client request command = %#x, transaction ID = "
-        "%" PRIu8,
-        rxHeader->handle, rxHeader->command, rxHeader->transaction);
+    CHPP_LOGE("Handle=%" PRIu8
+              " received unknown client request. command=%#x, transaction ID="
+              "%" PRIu8,
+              rxHeader->handle, rxHeader->command, rxHeader->transaction);
   }
 
   return handleValid;
@@ -121,7 +126,7 @@ static bool chppProcessPredefinedClientRequest(struct ChppAppState *context,
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
  *
- * @return False if handle is invalid. True otherwise
+ * @return False if handle is invalid. True otherwise.
  */
 static bool chppProcessPredefinedServiceResponse(struct ChppAppState *context,
                                                  uint8_t *buf, size_t len) {
@@ -130,15 +135,19 @@ static bool chppProcessPredefinedServiceResponse(struct ChppAppState *context,
   bool dispatchResult = true;
 
   switch (rxHeader->handle) {
+#ifdef CHPP_CLIENT_ENABLED_LOOPBACK
     case CHPP_HANDLE_LOOPBACK: {
-      // TODO
+      dispatchResult = chppDispatchLoopbackServiceResponse(context, buf, len);
       break;
     }
+#endif  // CHPP_CLIENT_ENABLED_LOOPBACK
 
+#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
     case CHPP_HANDLE_DISCOVERY: {
       dispatchResult = chppDispatchDiscoveryServiceResponse(context, buf, len);
       break;
     }
+#endif  // CHPP_CLIENT_ENABLED_DISCOVERY
 
     default: {
       handleValid = false;
@@ -146,11 +155,10 @@ static bool chppProcessPredefinedServiceResponse(struct ChppAppState *context,
   }
 
   if (dispatchResult == false) {
-    CHPP_LOGE(
-        "Handle = %" PRIu8
-        " received unknown server response command = %#x, transaction ID = "
-        "%" PRIu8,
-        rxHeader->handle, rxHeader->command, rxHeader->transaction);
+    CHPP_LOGE("Handle=%" PRIu8
+              " received unknown server response. command=%#x, transaction ID="
+              "%" PRIu8,
+              rxHeader->handle, rxHeader->command, rxHeader->transaction);
   }
 
   return handleValid;
@@ -164,7 +172,7 @@ static bool chppProcessPredefinedServiceResponse(struct ChppAppState *context,
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
  *
- * @return False if handle is invalid. True otherwise
+ * @return False if handle is invalid. True otherwise.
  */
 static bool chppProcessPredefinedClientNotification(
     struct ChppAppState *context, uint8_t *buf, size_t len) {
@@ -182,6 +190,7 @@ static bool chppProcessPredefinedClientNotification(
 
   return handleValid;
 }
+
 /**
  * Processes a service notification that is determined to be for a predefined
  * CHPP client.
@@ -190,7 +199,7 @@ static bool chppProcessPredefinedClientNotification(
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
  *
- * @return False if handle is invalid. True otherwise
+ * @return False if handle is invalid. True otherwise.
  */
 static bool chppProcessPredefinedServiceNotification(
     struct ChppAppState *context, uint8_t *buf, size_t len) {
@@ -214,18 +223,17 @@ static bool chppProcessPredefinedServiceNotification(
  * sufficient for the associated service.
  *
  * @param context Maintains status for each app layer instance.
- * @param handle Handle number for the service.
+ * @param rxHeader The pointer to the datagram RX header.
  * @param len Length of the datagram in bytes.
  *
  * @return true if length is ok.
  */
-static bool chppDatagramLenIsOk(struct ChppAppState *context, uint8_t handle,
-                                size_t len) {
+static bool chppDatagramLenIsOk(struct ChppAppState *context,
+                                struct ChppAppHeader *rxHeader, size_t len) {
   size_t minLen = SIZE_MAX;
+  uint8_t handle = rxHeader->handle;
 
-  if (handle < CHPP_HANDLE_NEGOTIATED_RANGE_START) {
-    // Predefined services
-
+  if (handle < CHPP_HANDLE_NEGOTIATED_RANGE_START) {  // Predefined
     switch (handle) {
       case CHPP_HANDLE_NONE:
         minLen = sizeof_member(struct ChppAppHeader, handle);
@@ -244,15 +252,31 @@ static bool chppDatagramLenIsOk(struct ChppAppState *context, uint8_t handle,
         CHPP_LOGE("Invalid predefined handle %" PRIu8, handle);
     }
 
-  } else {
-    // Negotiated services
-
-    minLen = chppServiceOfHandle(context, handle)->minLength;
+  } else {  // Negotiated
+    enum ChppMessageType messageType =
+        CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type);
+    switch (messageType) {
+      case CHPP_MESSAGE_TYPE_CLIENT_REQUEST:
+      case CHPP_MESSAGE_TYPE_CLIENT_NOTIFICATION: {
+        minLen = chppServiceOfHandle(context, handle)->minLength;
+        break;
+      }
+      case CHPP_MESSAGE_TYPE_SERVICE_RESPONSE:
+      case CHPP_MESSAGE_TYPE_SERVICE_NOTIFICATION: {
+        minLen = chppClientOfHandle(context, handle)->minLength;
+        break;
+      }
+      default: {
+        CHPP_LOGE("Invalid message type %d", messageType);
+        break;
+      }
+    }
   }
 
   if (len < minLen) {
-    CHPP_LOGE("Received datagram too short for handle=%" PRIu8 ", len=%zu",
-              handle, len);
+    CHPP_LOGE("Received datagram too short for handle=%" PRIu8
+              ", len=%" PRIuSIZE " < %" PRIuSIZE,
+              handle, len, minLen);
   }
   return (len >= minLen);
 }
@@ -264,7 +288,7 @@ static bool chppDatagramLenIsOk(struct ChppAppState *context, uint8_t handle,
  *
  * @param context Maintains status for each app layer instance.
  * @param handle Handle number for the client/service.
- * @param type Message type
+ * @param type Message type.
  *
  * @return Pointer to a function that dispatches incoming datagrams for any
  * particular client/service.
@@ -292,11 +316,6 @@ ChppDispatchFunction *chppGetDispatchFunction(struct ChppAppState *context,
       break;
     }
     default: {
-      CHPP_LOGE("Cannot dispatch unknown message type = %#x (handle = %" PRIu8
-                ")",
-                type, handle);
-      chppEnqueueTxErrorDatagram(context->transportContext,
-                                 CHPP_TRANSPORT_ERROR_APPLAYER);
       return NULL;
     }
   }
@@ -395,13 +414,129 @@ static void *chppClientServiceContextOfHandle(struct ChppAppState *appContext,
       break;
     }
     default: {
-      CHPP_LOGE(
-          "Cannot provide context for unknown message type = %#x (handle = "
-          "%" PRIu8 ")",
-          type, handle);
-      chppEnqueueTxErrorDatagram(appContext->transportContext,
-                                 CHPP_TRANSPORT_ERROR_APPLAYER);
+      CHPP_LOGE("Cannot provide context for unknown message type=0x%" PRIx8
+                " (handle=%" PRIu8 ")",
+                type, handle);
       return NULL;
+    }
+  }
+}
+
+/**
+ * Processes a received datagram that is determined to be for a predefined CHPP
+ * service. Responds with an error if unsuccessful.
+ *
+ * @param context Maintains status for each app layer instance.
+ * @param buf Input data. Cannot be null.
+ * @param len Length of input data in bytes.
+ */
+static void chppProcessPredefinedHandleDatagram(struct ChppAppState *context,
+                                                uint8_t *buf, size_t len) {
+  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+  bool success = true;
+
+  switch (CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type)) {
+    case CHPP_MESSAGE_TYPE_CLIENT_REQUEST: {
+      success = chppProcessPredefinedClientRequest(context, buf, len);
+      break;
+    }
+    case CHPP_MESSAGE_TYPE_CLIENT_NOTIFICATION: {
+      success = chppProcessPredefinedClientNotification(context, buf, len);
+      break;
+    }
+    case CHPP_MESSAGE_TYPE_SERVICE_RESPONSE: {
+      success = chppProcessPredefinedServiceResponse(context, buf, len);
+      break;
+    }
+    case CHPP_MESSAGE_TYPE_SERVICE_NOTIFICATION: {
+      success = chppProcessPredefinedServiceNotification(context, buf, len);
+      break;
+    }
+    default: {
+      success = false;
+    }
+  }
+
+  if (success == false) {
+    CHPP_LOGE("Predefined handle=%" PRIu8
+              " does not support message type=0x%" PRIx8 " (len=%" PRIuSIZE
+              ", transaction ID=%" PRIu8 ")",
+              rxHeader->handle, rxHeader->type, len, rxHeader->transaction);
+    chppEnqueueTxErrorDatagram(context->transportContext,
+                               CHPP_TRANSPORT_ERROR_APPLAYER);
+  }
+}
+
+/**
+ * Processes a received datagram that is determined to be for a negotiated CHPP
+ * service. Responds with an error if unsuccessful.
+ *
+ * @param context Maintains status for each app layer instance.
+ * @param buf Input data. Cannot be null.
+ * @param len Length of input data in bytes.
+ */
+static void chppProcessNegotiatedHandleDatagram(struct ChppAppState *context,
+                                                uint8_t *buf, size_t len) {
+  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+  enum ChppMessageType messageType = CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type);
+
+  void *clientServiceContext =
+      chppClientServiceContextOfHandle(context, rxHeader->handle, messageType);
+  if (clientServiceContext == NULL) {
+    CHPP_LOGE("Negotiated handle=%" PRIu8 " for RX message type=0x%" PRIx8
+              " is missing context (len=%" PRIuSIZE ", transaction ID=%" PRIu8
+              ")",
+              rxHeader->handle, rxHeader->type, len, rxHeader->transaction);
+    chppEnqueueTxErrorDatagram(context->transportContext,
+                               CHPP_TRANSPORT_ERROR_APPLAYER);
+    CHPP_DEBUG_ASSERT(false);
+
+  } else {
+    ChppDispatchFunction *dispatchFunc =
+        chppGetDispatchFunction(context, rxHeader->handle, messageType);
+    if (dispatchFunc == NULL) {
+      CHPP_LOGE("Negotiated handle=%" PRIu8
+                " does not support RX message type=0x%" PRIx8 " (len=%" PRIuSIZE
+                ", transaction ID=%" PRIu8 ")",
+                rxHeader->handle, rxHeader->type, len, rxHeader->transaction);
+      chppEnqueueTxErrorDatagram(context->transportContext,
+                                 CHPP_TRANSPORT_ERROR_APPLAYER);
+
+    } else {
+      // All good. Dispatch datagram and possibly notify a waiting client
+
+      enum ChppAppErrorCode error =
+          dispatchFunc(clientServiceContext, buf, len);
+      if (error != CHPP_APP_ERROR_NONE) {
+        CHPP_LOGE("Dispatching RX datagram failed. error=0x%" PRIx16
+                  " handle=0x%" PRIx8 ", type =0x%" PRIx8
+                  ", transaction ID=%" PRIu8 ", command=0x%" PRIx16
+                  ", len=%" PRIuSIZE,
+                  error, rxHeader->handle, rxHeader->type,
+                  rxHeader->transaction, rxHeader->command, len);
+
+        // Only client requests require a dispatch failure response.
+        if (messageType == CHPP_MESSAGE_TYPE_CLIENT_REQUEST) {
+          struct ChppAppHeader *response =
+              chppAllocServiceResponseFixed(rxHeader, struct ChppAppHeader);
+          response->error = error;
+          chppEnqueueTxDatagramOrFail(context->transportContext, response,
+                                      sizeof(*response));
+        }
+      } else if (messageType == CHPP_MESSAGE_TYPE_SERVICE_RESPONSE) {
+        // Datagram is a service response. Check for synchronous operation and
+        // notify waiting client if needed.
+
+        struct ChppClientState *clientContext =
+            (struct ChppClientState *)clientServiceContext;
+        chppMutexLock(&clientContext->responseMutex);
+        clientContext->responseReady = true;
+        CHPP_LOGD(
+            "Finished dispatching a service response. Notifying a potential "
+            "synchronous client");
+        chppConditionVariableSignal(&clientContext->responseCondVar);
+        chppMutexUnlock(&clientContext->responseMutex);
+      }
     }
   }
 }
@@ -412,22 +547,63 @@ static void *chppClientServiceContextOfHandle(struct ChppAppState *appContext,
 
 void chppAppInit(struct ChppAppState *appContext,
                  struct ChppTransportState *transportContext) {
+  // Default initialize all service/clients
+  struct ChppClientServiceSet set;
+  memset(&set, 0xff, sizeof(set));  // set all bits to 1
+
+  chppAppInitWithClientServiceSet(appContext, transportContext, set);
+}
+
+void chppAppInitWithClientServiceSet(
+    struct ChppAppState *appContext,
+    struct ChppTransportState *transportContext,
+    struct ChppClientServiceSet clientServiceSet) {
   CHPP_NOT_NULL(appContext);
   CHPP_NOT_NULL(transportContext);
 
-  memset(appContext, 0, sizeof(struct ChppAppState));
+  CHPP_LOGI("Initializing the CHPP app layer");
 
+  // Don't reset entire ChppAppState to avoid clearing non-transient
+  // contents e.g. discovery mutex/condvar/states.
+  appContext->registeredServiceCount = 0;
+  memset(appContext->registeredServices, 0,
+         sizeof(appContext->registeredServices));
+  memset(appContext->registeredServiceContexts, 0,
+         sizeof(appContext->registeredServiceContexts));
+  appContext->registeredClientCount = 0;
+  memset(appContext->registeredClients, 0,
+         sizeof(appContext->registeredClients));
+  memset(appContext->registeredClientContexts, 0,
+         sizeof(appContext->registeredClientContexts));
+  memset(appContext->clientIndexOfServiceIndex, 0,
+         sizeof(appContext->clientIndexOfServiceIndex));
+
+  appContext->clientServiceSet = clientServiceSet;
   appContext->transportContext = transportContext;
 
+#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
+  chppDiscoveryInit(appContext);
+#endif  // CHPP_CLIENT_ENABLED_DISCOVERY
   chppPalSystemApiInit(appContext);
-
   chppRegisterCommonServices(appContext);
-
   chppRegisterCommonClients(appContext);
 }
 
 void chppAppDeinit(struct ChppAppState *appContext) {
-  // TODO
+  chppAppDeinitTransient(appContext);
+
+#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
+  // Discovery should only be deinitialized on true CHPP app deinit
+  // (shutdown), since a client may be waiting on discovery completion
+  // during a transient deinit (reset).
+  chppDiscoveryDeinit(appContext);
+#endif  // CHPP_CLIENT_ENABLED_DISCOVERY
+}
+
+void chppAppDeinitTransient(struct ChppAppState *appContext) {
+  CHPP_NOT_NULL(appContext);
+
+  CHPP_LOGI("Deinitializing the CHPP app layer");
 
   chppDeregisterCommonClients(appContext);
   chppDeregisterCommonServices(appContext);
@@ -438,108 +614,32 @@ void chppProcessRxDatagram(struct ChppAppState *context, uint8_t *buf,
                            size_t len) {
   struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
 
-  if (chppDatagramLenIsOk(context, rxHeader->handle, len)) {
-    if (rxHeader->handle >=
-        CHPP_SERVICE_HANDLE_OF_INDEX(context->registeredServiceCount)) {
-      CHPP_LOGE("Received datagram for invalid handle: %" PRIu8
-                ", len = %zu, type = %#x, transaction ID = %" PRIu8,
-                rxHeader->handle, len, rxHeader->type, rxHeader->transaction);
+  if (len == 0) {
+    CHPP_LOGE("chppProcessRxDatagram called with payload length of 0");
+    CHPP_DEBUG_ASSERT(false);
 
-    } else if (rxHeader->handle == CHPP_HANDLE_NONE) {
-      // Non-handle based communication
+  } else if (len < sizeof(struct ChppAppHeader)) {
+    uint8_t *handle = (uint8_t *)buf;
+    CHPP_LOGD("App layer RX datagram (len=%" PRIuSIZE ") for handle=%" PRIu8,
+              len, *handle);
 
+  } else {
+    CHPP_LOGD("App layer RX datagram (len=%" PRIuSIZE ") for handle=%" PRIu8
+              ", type=0x%" PRIx8 ", transaction ID=%" PRIu8 ", error=%" PRIu8
+              ", command=0x%" PRIx16,
+              len, rxHeader->handle, rxHeader->type, rxHeader->transaction,
+              rxHeader->error, rxHeader->command);
+  }
+
+  if (chppDatagramLenIsOk(context, rxHeader, len)) {
+    if (rxHeader->handle == CHPP_HANDLE_NONE) {
       chppDispatchNonHandle(context, buf, len);
 
     } else if (rxHeader->handle < CHPP_HANDLE_NEGOTIATED_RANGE_START) {
-      // Predefined services / clients
-
-      bool success = true;
-
-      switch (CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type)) {
-        case CHPP_MESSAGE_TYPE_CLIENT_REQUEST: {
-          success = chppProcessPredefinedClientRequest(context, buf, len);
-          break;
-        }
-        case CHPP_MESSAGE_TYPE_CLIENT_NOTIFICATION: {
-          success = chppProcessPredefinedClientNotification(context, buf, len);
-          break;
-        }
-        case CHPP_MESSAGE_TYPE_SERVICE_RESPONSE: {
-          success = chppProcessPredefinedServiceResponse(context, buf, len);
-          break;
-        }
-        case CHPP_MESSAGE_TYPE_SERVICE_NOTIFICATION: {
-          success = chppProcessPredefinedServiceNotification(context, buf, len);
-          break;
-        }
-        default: {
-          CHPP_LOGE(
-              "Received unknown message type = %#x for predefined handle  = "
-              "%" PRIu8 " len = %zu, transaction ID = %" PRIu8,
-              rxHeader->type, rxHeader->handle, len, rxHeader->transaction);
-          chppEnqueueTxErrorDatagram(context->transportContext,
-                                     CHPP_TRANSPORT_ERROR_APPLAYER);
-        }
-      }
-
-      if (success == false) {
-        CHPP_LOGE(
-            "Predefined client/service with handle = %" PRIu8
-            " does not support message type = %#x (len = %zu, transaction ID "
-            "= %" PRIu8 ")",
-            rxHeader->handle, rxHeader->type, len, rxHeader->transaction);
-        chppEnqueueTxErrorDatagram(context->transportContext,
-                                   CHPP_TRANSPORT_ERROR_APPLAYER);
-      }
+      chppProcessPredefinedHandleDatagram(context, buf, len);
 
     } else {
-      // Negotiated services / clients
-
-      ChppDispatchFunction *dispatchFunc = chppGetDispatchFunction(
-          context, rxHeader->handle, CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type));
-
-      void *clientServiceContext = chppClientServiceContextOfHandle(
-          context, rxHeader->handle, CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type));
-
-      if (dispatchFunc == NULL) {
-        CHPP_LOGE("Negotiated handle = %" PRIu8
-                  " does not support Rx message type = %" PRIu8,
-                  rxHeader->handle, rxHeader->type);
-
-      } else if (clientServiceContext == NULL) {
-        CHPP_LOGE("Client/service for negotiated handle = %" PRIu8
-                  " and message type = %" PRIu8 " is missing context",
-                  rxHeader->handle, rxHeader->type);
-
-      } else if (dispatchFunc(clientServiceContext, buf, len) == false) {
-        CHPP_LOGE("Received unknown message type  = %" PRIu8
-                  " for handle = %" PRIu8
-                  ", command = %#x, transaction ID = %" PRIu8,
-                  rxHeader->type, rxHeader->handle, rxHeader->command,
-                  rxHeader->transaction);
-
-        // Allocate the response
-        struct ChppAppHeader *response =
-            chppAllocServiceResponseFixed(rxHeader, struct ChppAppHeader);
-
-        // Populate the response
-        response->error = CHPP_APP_ERROR_INVALID_COMMAND;
-
-        // Send out response datagram
-        chppEnqueueTxDatagramOrFail(context->transportContext, response,
-                                    sizeof(*response));
-
-      } else if (CHPP_APP_GET_MESSAGE_TYPE(rxHeader->type) ==
-                 CHPP_MESSAGE_TYPE_SERVICE_RESPONSE) {
-        struct ChppClientState *clientContext =
-            (struct ChppClientState *)clientServiceContext;
-
-        if (clientContext->waitingForResponse) {
-          // Dispatched a synchronous response successfully. Notify client
-          chppNotifierSignal(&clientContext->responseNotifier,
-                             CHPP_SIGNAL_CLIENT_EVENT);
-        }
-      }
+      chppProcessNegotiatedHandleDatagram(context, buf, len);
     }
   }
 

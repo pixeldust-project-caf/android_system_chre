@@ -33,12 +33,18 @@ extern "C" {
 #define CHPP_PAL_WWAN_API_VERSION CHRE_PAL_WWAN_API_V1_4
 
 /**
- * Data structure used by the Get Capabilities Response.
+ * Data structures used by the Get Capabilities Response.
  */
+CHPP_PACKED_START
+struct ChppWwanGetCapabilitiesParameters {
+  uint32_t capabilities;
+} CHPP_PACKED_ATTR;
+CHPP_PACKED_END
+
 CHPP_PACKED_START
 struct ChppWwanGetCapabilitiesResponse {
   struct ChppAppHeader header;
-  uint32_t capabilities;
+  struct ChppWwanGetCapabilitiesParameters params;
 } CHPP_PACKED_ATTR;
 CHPP_PACKED_END
 
@@ -53,10 +59,10 @@ enum ChppWwanCommands {
   CHPP_WWAN_CLOSE = 0x0001,
 
   //! Retrieves a set of flags indicating supported features.
-  CHPP_WWAN_GET_CAPABILITIES = 0x2010,
+  CHPP_WWAN_GET_CAPABILITIES = 0x0002,
 
   //! Query information about the current serving cell and its neighbors.
-  CHPP_WWAN_GET_CELLINFO_ASYNC = 0x2020,
+  CHPP_WWAN_GET_CELLINFO_ASYNC = 0x0003,
 };
 
 #ifdef __cplusplus

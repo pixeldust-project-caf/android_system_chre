@@ -49,16 +49,6 @@ class BasicSensorTestBase : public Test {
   virtual uint8_t getSensorType() const = 0;
 
   /**
-   * Abstract method indicating if this sensor is required for a valid
-   * CHRE implementation.
-   *
-   * A CHRE isn't useful without certain sensors available.
-   *
-   * @returns true if this is sensor is required; false otherwise.
-   */
-  virtual bool isRequiredSensor() const = 0;
-
-  /**
    * Abstract method indicating if this is an on-change sensor.
    *
    * @returns true if this sensor is on-change; false otherwise.
@@ -120,7 +110,7 @@ class BasicSensorTestBase : public Test {
   void handleSamplingChangeEvent(
       const chreSensorSamplingStatusEvent *eventData);
   void handleSensorDataEvent(uint16_t eventType, const void *eventData);
-  void sanityCheckHeader(const chreSensorDataHeader *header, uint16_t eventType,
+  void verifyEventHeader(const chreSensorDataHeader *header, uint16_t eventType,
                          uint64_t eventDuration);
 };
 
