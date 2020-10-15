@@ -53,8 +53,9 @@ extern "C" {
 #define CHPP_DEBUG_ASSERT(var) CHPP_ASSERT(var)
 #endif
 
-#ifndef PRIu64  // Pre-C99 lacks PRIu64 / llu support
-#define PRIu64 "lu"
+#ifndef PRIu64  // Pre-C99 lacks PRIu64 support. Note that the correct
+                // definition on pre-C99 systems would be compiler-dependent.
+#define PRIu64 "llu"
 #endif
 
 #if defined(__GNUC__) && (__STDC_VERSION__ >= 201112L)
@@ -103,11 +104,19 @@ extern "C" {
 #define CHPP_PACKED_START
 #define CHPP_PACKED_END
 #define CHPP_PACKED_ATTR __attribute__((packed))
+
 #elif defined(__ICCARM__) || defined(__CC_ARM)
 // For IAR ARM and Keil MDK-ARM compilers
 #define CHPP_PACKED_START _Pragma("pack(push, 1)")
 #define CHPP_PACKED_END _Pragma("pack(pop)")
 #define CHPP_PACKED_ATTR
+
+#elif defined(_MSC_VER)
+// For Microsoft Visual Studio
+#define CHPP_PACKED_START __pragma(pack(push, 1))
+#define CHPP_PACKED_END __pragma(pack(pop))
+#define CHPP_PACKED_ATTR
+
 #else
 // Unknown compiler
 #error Unrecognized compiler
@@ -118,6 +127,10 @@ extern "C" {
     chppFree(p);                 \
     (p) = NULL;                  \
   } while (0)
+
+//! Cast a const pointer to a non-const. This is necessary for removing const
+//! with the -Wcast-qual compiler flag.
+#define CHPP_CONST_CAST_POINTER(p) (void *)(intptr_t)(p)
 
 #ifdef __cplusplus
 }

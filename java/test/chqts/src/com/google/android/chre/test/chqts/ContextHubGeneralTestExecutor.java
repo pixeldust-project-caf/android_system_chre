@@ -22,7 +22,6 @@ import android.hardware.location.ContextHubManager;
 import android.hardware.location.ContextHubTransaction;
 import android.hardware.location.NanoAppBinary;
 import android.hardware.location.NanoAppMessage;
-import android.hardware.location.NanoAppState;
 import android.util.Log;
 
 import com.google.android.utils.chre.ChreTestUtil;
@@ -193,10 +192,11 @@ public abstract class ContextHubGeneralTestExecutor extends ContextHubClientCall
     public void init() {
         Assert.assertFalse("init() must not be invoked when already initialized", mInitialized);
 
+        // Initialize the CountDownLatch before run() since some nanoapps will start on load.
+        mCountDownLatch = new CountDownLatch(1);
+
         mContextHubClient = mContextHubManager.createClient(mContextHubInfo, this);
         Assert.assertTrue(mContextHubClient != null);
-
-        unloadAllNanoApps();
 
         for (GeneralTestNanoApp test : mGeneralTestNanoAppList) {
             if (test.loadAtInit()) {
@@ -215,7 +215,6 @@ public abstract class ContextHubGeneralTestExecutor extends ContextHubClientCall
      */
     public void run(long timeoutSeconds) {
         mThreadId = Thread.currentThread().getId();
-        mCountDownLatch = new CountDownLatch(1);
 
         for (GeneralTestNanoApp test : mGeneralTestNanoAppList) {
             if (test.loadAtInit() && test.sendStartMessage()) {
@@ -337,15 +336,6 @@ public abstract class ContextHubGeneralTestExecutor extends ContextHubClientCall
      */
     protected abstract void handleMessageFromNanoApp(
             long nanoAppId, ContextHubTestConstants.MessageType type, byte[] data);
-
-    private void unloadAllNanoApps() {
-        List<NanoAppState> stateList =
-                ChreTestUtil.queryNanoAppsAssertSuccess(mContextHubManager, mContextHubInfo);
-        for (NanoAppState state : stateList) {
-            ChreTestUtil.unloadNanoAppAssertSuccess(
-                    mContextHubManager, mContextHubInfo, state.getNanoAppId());
-        }
-    }
 
     // TODO: Remove this hack
     protected NanoAppMessage hackMessageToNanoApp(NanoAppMessage message) {

@@ -27,14 +27,14 @@
 #include "chpp/app.h"
 #include "chpp/common/discovery.h"
 #include "chpp/common/gnss.h"
+#include "chpp/common/gnss_types.h"
 #include "chpp/common/standard_uuids.h"
 #include "chpp/common/wifi.h"
+#include "chpp/common/wifi_types.h"
 #include "chpp/common/wwan.h"
+#include "chpp/crc.h"
 #include "chpp/macros.h"
 #include "chpp/memory.h"
-#include "chpp/services/discovery.h"
-#include "chpp/services/gnss_types.h"
-#include "chpp/services/wifi_types.h"
 #include "chpp/transport.h"
 #include "chre/pal/wwan.h"
 
@@ -174,14 +174,14 @@ void addPreambleToBuf(uint8_t *buf, size_t *location) {
 ChppTransportHeader *addTransportHeaderToBuf(uint8_t *buf, size_t *location) {
   size_t oldLoc = *location;
 
-  static const ChppTransportHeader transHeader = {
-      // Default values for initial, minimum size request packet
-      .flags = CHPP_TRANSPORT_FLAG_FINISHED_DATAGRAM,
-      .packetCode = CHPP_TRANSPORT_ERROR_NONE,
-      .ackSeq = 1,
-      .seq = 0,
-      .length = sizeof(ChppAppHeader),
-  };
+  // Default values for initial, minimum size request packet
+  ChppTransportHeader transHeader = {};
+  transHeader.flags = CHPP_TRANSPORT_FLAG_FINISHED_DATAGRAM;
+  transHeader.packetCode = CHPP_TRANSPORT_ERROR_NONE;
+  transHeader.ackSeq = 1;
+  transHeader.seq = 0;
+  transHeader.length = sizeof(ChppAppHeader);
+  transHeader.reserved = 0;
 
   memcpy(&buf[*location], &transHeader, sizeof(transHeader));
   *location += sizeof(transHeader);
@@ -203,14 +203,13 @@ ChppTransportHeader *addTransportHeaderToBuf(uint8_t *buf, size_t *location) {
 ChppAppHeader *addAppHeaderToBuf(uint8_t *buf, size_t *location) {
   size_t oldLoc = *location;
 
-  static const ChppAppHeader appHeader = {
-      // Default values - to be updated later as necessary
-      .handle = CHPP_HANDLE_NEGOTIATED_RANGE_START,
-      .type = CHPP_MESSAGE_TYPE_CLIENT_REQUEST,
-      .transaction = 0,
-      .command = 0,
-      .error = CHPP_APP_ERROR_NONE,
-  };
+  // Default values - to be updated later as necessary
+  ChppAppHeader appHeader = {};
+  appHeader.handle = CHPP_HANDLE_NEGOTIATED_RANGE_START;
+  appHeader.type = CHPP_MESSAGE_TYPE_CLIENT_REQUEST;
+  appHeader.transaction = 0;
+  appHeader.error = CHPP_APP_ERROR_NONE;
+  appHeader.command = 0;
 
   memcpy(&buf[*location], &appHeader, sizeof(appHeader));
   *location += sizeof(appHeader);
@@ -222,15 +221,20 @@ ChppAppHeader *addAppHeaderToBuf(uint8_t *buf, size_t *location) {
  * Adds a transport footer to a certain location in a buffer, and increases the
  * location accordingly, to account for the length of the added preamble.
  *
- * TODO: calculate checksum for the footer.
- *
  * @param buf Buffer.
- * @param location Location to add the preamble, which its value will be
+ * @param location Location to add the footer. The value of location will be
  * increased accordingly.
+ *
  */
 void addTransportFooterToBuf(uint8_t *buf, size_t *location) {
-  // TODO: add checksum
-  UNUSED_VAR(buf);
+  uint32_t *checksum = (uint32_t *)&buf[*location];
+
+#ifdef CHPP_CHECKSUM_ENABLED
+  *checksum = chppCrc32(0, &buf[CHPP_PREAMBLE_LEN_BYTES],
+                        *location - CHPP_PREAMBLE_LEN_BYTES);
+#else
+  *checksum = 1;
+#endif  // CHPP_CHECKSUM_ENABLED
 
   *location += sizeof(ChppTransportFooter);
 }
@@ -373,7 +377,7 @@ TEST_P(TransportTests, ZeroThenPreambleInput) {
  * Rx Testing with various length payloads of zeros
  */
 TEST_P(TransportTests, RxPayloadOfZeros) {
-  mTransportContext.rxStatus.state = CHPP_STATE_HEADER;
+  mTransportContext.rxStatus.state = CHPP_STATE_PREAMBLE;
   size_t len = static_cast<size_t>(GetParam());
 
   mTransportContext.txStatus.hasPacketsToSend = true;
@@ -382,12 +386,18 @@ TEST_P(TransportTests, RxPayloadOfZeros) {
 
   if (len <= kMaxChunkSize) {
     size_t loc = 0;
+    addPreambleToBuf(mBuf, &loc);
     ChppTransportHeader *transHeader = addTransportHeaderToBuf(mBuf, &loc);
-    transHeader->length = len;
+
+    transHeader->length = static_cast<uint16_t>(len);
+    loc += len;
+
+    addTransportFooterToBuf(mBuf, &loc);
 
     // Send header and check for correct state
     EXPECT_FALSE(
-        chppRxDataCb(&mTransportContext, mBuf, sizeof(ChppTransportHeader)));
+        chppRxDataCb(&mTransportContext, mBuf,
+                     CHPP_PREAMBLE_LEN_BYTES + sizeof(ChppTransportHeader)));
     if (len > 0) {
       EXPECT_EQ(mTransportContext.rxStatus.state, CHPP_STATE_PAYLOAD);
     } else {
@@ -401,8 +411,9 @@ TEST_P(TransportTests, RxPayloadOfZeros) {
 
     // Send payload if any and check for correct state
     if (len > 0) {
-      EXPECT_FALSE(chppRxDataCb(&mTransportContext,
-                                &mBuf[sizeof(ChppTransportHeader)], len));
+      EXPECT_FALSE(chppRxDataCb(
+          &mTransportContext,
+          &mBuf[CHPP_PREAMBLE_LEN_BYTES + sizeof(ChppTransportHeader)], len));
       EXPECT_EQ(mTransportContext.rxStatus.state, CHPP_STATE_FOOTER);
     }
 
@@ -413,9 +424,10 @@ TEST_P(TransportTests, RxPayloadOfZeros) {
     EXPECT_EQ(mTransportContext.rxStatus.expectedSeq, transHeader->seq);
 
     // Send footer
-    EXPECT_TRUE(chppRxDataCb(&mTransportContext,
-                             &mBuf[sizeof(ChppTransportHeader) + len],
-                             sizeof(ChppTransportFooter)));
+    EXPECT_TRUE(chppRxDataCb(
+        &mTransportContext,
+        &mBuf[CHPP_PREAMBLE_LEN_BYTES + sizeof(ChppTransportHeader) + len],
+        sizeof(ChppTransportFooter)));
 
     // The next expected packet sequence # should incremented only if the
     // received packet is payload-bearing.
@@ -514,7 +526,7 @@ TEST_P(TransportTests, EnqueueDatagrams) {
  * Loopback testing with various length payloads of zeros
  */
 TEST_P(TransportTests, LoopbackPayloadOfZeros) {
-  mTransportContext.rxStatus.state = CHPP_STATE_HEADER;
+  mTransportContext.rxStatus.state = CHPP_STATE_PREAMBLE;
   size_t len = static_cast<size_t>(GetParam());
 
   mTransportContext.txStatus.hasPacketsToSend = true;
@@ -523,19 +535,25 @@ TEST_P(TransportTests, LoopbackPayloadOfZeros) {
 
   if (len <= kMaxChunkSize) {
     size_t loc = 0;
+    addPreambleToBuf(mBuf, &loc);
     ChppTransportHeader *transHeader = addTransportHeaderToBuf(mBuf, &loc);
-    transHeader->length = len;
+    transHeader->length = static_cast<uint16_t>(len);
 
     // Loopback App header (only 2 fields required)
-    mBuf[sizeof(ChppTransportHeader)] = CHPP_HANDLE_LOOPBACK;
-    mBuf[sizeof(ChppTransportHeader) + 1] = CHPP_MESSAGE_TYPE_CLIENT_REQUEST;
+    mBuf[CHPP_PREAMBLE_LEN_BYTES + sizeof(ChppTransportHeader)] =
+        CHPP_HANDLE_LOOPBACK;
+    mBuf[CHPP_PREAMBLE_LEN_BYTES + sizeof(ChppTransportHeader) + 1] =
+        CHPP_MESSAGE_TYPE_CLIENT_REQUEST;
 
-    // TODO: Add checksum
+    // Payload of zeros
+    loc += len;
+
+    addTransportFooterToBuf(mBuf, &loc);
+    EXPECT_EQ(loc, CHPP_PREAMBLE_LEN_BYTES + sizeof(ChppTransportHeader) + len +
+                       sizeof(ChppTransportFooter));
 
     // Send header + payload (if any) + footer
-    EXPECT_TRUE(chppRxDataCb(
-        &mTransportContext, mBuf,
-        sizeof(ChppTransportHeader) + len + sizeof(ChppTransportFooter)));
+    EXPECT_TRUE(chppRxDataCb(&mTransportContext, mBuf, loc));
 
     // Check for correct state
     EXPECT_EQ(mTransportContext.rxStatus.state, CHPP_STATE_PREAMBLE);
@@ -603,7 +621,7 @@ TEST_P(TransportTests, LoopbackPayloadOfZeros) {
  * Discovery service + Transaction ID
  */
 TEST_P(TransportTests, DiscoveryService) {
-  uint8_t transactionID = static_cast<size_t>(GetParam());
+  uint8_t transactionID = static_cast<uint8_t>(GetParam());
   size_t len = 0;
 
   mTransportContext.txStatus.hasPacketsToSend = true;
@@ -651,17 +669,18 @@ TEST_P(TransportTests, DiscoveryService) {
   EXPECT_EQ(mTransportContext.pendingTxPacket.length, responseLoc);
 
   // Check service configuration response
-  static const ChppServiceDescriptor wwanServiceDescriptor = {
-      .uuid = CHPP_UUID_WWAN_STANDARD,
 
-      // Human-readable name
-      .name = "WWAN",
+  ChppServiceDescriptor wwanServiceDescriptor = {};
+  static const uint8_t uuid[CHPP_SERVICE_UUID_LEN] = CHPP_UUID_WWAN_STANDARD;
+  memcpy(&wwanServiceDescriptor.uuid, &uuid,
+         sizeof(wwanServiceDescriptor.uuid));
+  static const char name[CHPP_SERVICE_NAME_MAX_LEN] = "WWAN";
+  memcpy(&wwanServiceDescriptor.name, &name,
+         sizeof(wwanServiceDescriptor.name));
+  wwanServiceDescriptor.version.major = 1;
+  wwanServiceDescriptor.version.minor = 0;
+  wwanServiceDescriptor.version.patch = 0;
 
-      // Version
-      .version.major = 1,
-      .version.minor = 0,
-      .version.patch = 0,
-  };
   EXPECT_EQ(std::memcmp(services[0].uuid, wwanServiceDescriptor.uuid,
                         sizeof(wwanServiceDescriptor.uuid)),
             0);
@@ -676,6 +695,77 @@ TEST_P(TransportTests, DiscoveryService) {
   chppWorkThreadStop(&mTransportContext);
   t1.join();
 }
+
+#ifdef CHPP_CHECKSUM_ENABLED
+/**
+ * CRC-32 calculation for several pre-known test vectors.
+ */
+TEST_F(TransportTests, CRC32Basic) {
+  static const char kTest1Str[] = "Hello World Test!";
+  static const uint8_t *kTest1 = (const uint8_t *)kTest1Str;
+  EXPECT_EQ(chppCrc32(0, kTest1, 17), 0x613B1D74);
+  EXPECT_EQ(chppCrc32(0, kTest1, 16), 0x5F88D7D9);
+  EXPECT_EQ(chppCrc32(0, kTest1, 1), 0xAA05262F);
+  EXPECT_EQ(chppCrc32(0, kTest1, 0), 0x00000000);
+
+  static const uint8_t kTest2[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+  EXPECT_EQ(chppCrc32(0, kTest2, 6), 0x41D9ED00);
+  EXPECT_EQ(chppCrc32(0, kTest2, 5), 0xD2FD1072);
+  EXPECT_EQ(chppCrc32(0, kTest2, 4), 0xFFFFFFFF);
+  EXPECT_EQ(chppCrc32(0, kTest2, 3), 0xFFFFFF00);
+  EXPECT_EQ(chppCrc32(0, kTest2, 2), 0xFFFF0000);
+  EXPECT_EQ(chppCrc32(0, kTest2, 1), 0xFF000000);
+  EXPECT_EQ(chppCrc32(0, kTest2, 0), 0x00000000);
+
+  static const char kTest3Str[] = "123456789";
+  static const uint8_t *kTest3 = (const uint8_t *)kTest3Str;
+  EXPECT_EQ(chppCrc32(0, kTest3, 9), 0xCBF43926);
+
+  static const uint8_t kTest4[] = {0x00, 0x00, 0x00, 0x00};
+  EXPECT_EQ(chppCrc32(0, kTest4, sizeof(kTest4)), 0x2144DF1C);
+
+  static const uint8_t kTest5[] = {0xF2, 0x01, 0x83};
+  EXPECT_EQ(chppCrc32(0, kTest5, sizeof(kTest5)), 0x24AB9D77);
+
+  static const uint8_t kTest6[] = {0x0F, 0xAA, 0x00, 0x55};
+  EXPECT_EQ(chppCrc32(0, kTest6, sizeof(kTest6)), 0xB6C9B287);
+
+  static const uint8_t kTest7[] = {0x00, 0xFF, 0x55, 0x11};
+  EXPECT_EQ(chppCrc32(0, kTest7, sizeof(kTest7)), 0x32A06212);
+
+  static const uint8_t kTest8[] = {0x33, 0x22, 0x55, 0xAA, 0xBB,
+                                   0xCC, 0xDD, 0xEE, 0xFF};
+  EXPECT_EQ(chppCrc32(0, kTest8, sizeof(kTest8)), 0xB0AE863D);
+
+  static const uint8_t kTest9[] = {0x92, 0x6B, 0x55};
+  EXPECT_EQ(chppCrc32(0, kTest9, sizeof(kTest9)), 0x9CDEA29B);
+}
+
+/**
+ * CRC-32 calculation for daisy-chained input.
+ */
+TEST_F(TransportTests, CRC32DaisyChained) {
+  static const size_t kMaxLen = 10000;
+  uint8_t test[kMaxLen];
+  // Populate test with 8-bit LFSR
+  // Feedback polynomial is x^8 + x^6 + x^5 + x^4 + 1
+  static uint8_t lfsr = 1;
+  for (size_t i = 0; i < kMaxLen; i++) {
+    test[i] = lfsr;
+    lfsr = (lfsr >> 1) |
+           (((lfsr << 7) ^ (lfsr << 5) ^ (lfsr << 4) ^ (lfsr << 3)) & 0x80);
+  }
+
+  for (size_t len = 0; len < kMaxLen; len += 1000) {
+    uint32_t fullCRC = chppCrc32(0, &test[0], len);
+    for (size_t partition = 0; partition <= len; partition++) {
+      uint32_t partialCRC = chppCrc32(0, &test[0], partition);
+      EXPECT_EQ(chppCrc32(partialCRC, &test[partition], len - partition),
+                fullCRC);
+    }
+  }
+}
+#endif  // CHPP_CHECKSUM_ENABLED
 
 /**
  * WWAN service Open and GetCapabilities.
@@ -824,22 +914,22 @@ TEST_F(TransportTests, Discovery) {
   appHeader->command = CHPP_DISCOVERY_COMMAND_DISCOVER_ALL;
   appHeader->type = CHPP_MESSAGE_TYPE_SERVICE_RESPONSE;
 
-  static const ChppServiceDescriptor wwanServiceDescriptor = {
-      .uuid = CHPP_UUID_WWAN_STANDARD,
+  ChppServiceDescriptor wwanServiceDescriptor = {};
+  static const uint8_t uuid[CHPP_SERVICE_UUID_LEN] = CHPP_UUID_WWAN_STANDARD;
+  memcpy(&wwanServiceDescriptor.uuid, &uuid,
+         sizeof(wwanServiceDescriptor.uuid));
+  static const char name[CHPP_SERVICE_NAME_MAX_LEN] = "WWAN";
+  memcpy(&wwanServiceDescriptor.name, &name,
+         sizeof(wwanServiceDescriptor.name));
+  wwanServiceDescriptor.version.major = 1;
+  wwanServiceDescriptor.version.minor = 0;
+  wwanServiceDescriptor.version.patch = 0;
 
-      // Human-readable name
-      .name = "WWAN",
-
-      // Version
-      .version.major = 1,
-      .version.minor = 0,
-      .version.patch = 0,
-  };
   memcpy(&mBuf[len], &wwanServiceDescriptor, sizeof(ChppServiceDescriptor));
   len += sizeof(ChppServiceDescriptor);
 
-  transHeader->length =
-      len - sizeof(ChppTransportHeader) - CHPP_PREAMBLE_LEN_BYTES;
+  transHeader->length = static_cast<uint16_t>(
+      len - sizeof(ChppTransportHeader) - CHPP_PREAMBLE_LEN_BYTES);
 
   addTransportFooterToBuf(mBuf, &len);
 
@@ -860,7 +950,7 @@ TEST_F(TransportTests, Discovery) {
   // Cleanup
   chppWorkThreadStop(&mTransportContext);
   t1.join();
-}  // namespace
+}
 
 INSTANTIATE_TEST_SUITE_P(TransportTestRange, TransportTests,
                          testing::ValuesIn(kChunkSizes));

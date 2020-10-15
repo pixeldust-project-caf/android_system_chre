@@ -22,8 +22,8 @@
 
 #include "chpp/app.h"
 #include "chpp/common/discovery.h"
+#include "chpp/log.h"
 #include "chpp/macros.h"
-#include "chpp/platform/log.h"
 #include "chpp/services.h"
 #include "chpp/transport.h"
 
@@ -56,7 +56,7 @@ static void chppDiscoveryDiscoverAll(
       context->registeredServiceCount, services);
 
   if (response == NULL) {
-    CHPP_LOG_OOM("DiscoverAll response of %" PRIuSIZE " bytes", responseLen);
+    CHPP_LOG_OOM();
     CHPP_ASSERT(false);
 
   } else {

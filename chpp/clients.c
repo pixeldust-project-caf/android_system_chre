@@ -34,9 +34,9 @@
 #ifdef CHPP_CLIENT_ENABLED_WWAN
 #include "chpp/clients/wwan.h"
 #endif
+#include "chpp/log.h"
 #include "chpp/macros.h"
 #include "chpp/memory.h"
-#include "chpp/platform/log.h"
 #include "chpp/time.h"
 #include "chpp/transport.h"
 
@@ -188,7 +188,7 @@ void chppClientTimestampRequest(struct ChppRequestResponseState *rRState,
 }
 
 bool chppClientTimestampResponse(struct ChppRequestResponseState *rRState,
-                                 struct ChppAppHeader *responseHeader) {
+                                 const struct ChppAppHeader *responseHeader) {
   uint64_t previousResponseTime = rRState->responseTime;
   rRState->responseTime = chppGetCurrentTimeNs();
 

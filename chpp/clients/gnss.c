@@ -26,11 +26,11 @@
 #include "chpp/clients.h"
 #include "chpp/clients/discovery.h"
 #include "chpp/common/gnss.h"
+#include "chpp/common/gnss_types.h"
 #include "chpp/common/standard_uuids.h"
+#include "chpp/log.h"
 #include "chpp/macros.h"
 #include "chpp/memory.h"
-#include "chpp/platform/log.h"
-#include "chpp/services/gnss_types.h"
 #include "chre/pal/gnss.h"
 #include "chre_api/chre/gnss.h"
 
@@ -115,8 +115,8 @@ static const struct chrePalGnssCallbacks *gCallbacks;
 
 static bool chppGnssClientOpen(const struct chrePalSystemApi *systemApi,
                                const struct chrePalGnssCallbacks *callbacks);
-static void chppGnssClientClose();
-static uint32_t chppGnssClientGetCapabilities();
+static void chppGnssClientClose(void);
+static uint32_t chppGnssClientGetCapabilities(void);
 static bool chppGnssClientControlLocationSession(bool enable,
                                                  uint32_t minIntervalMs,
                                                  uint32_t minTimeToNextFixMs);
@@ -444,27 +444,22 @@ static void chppGnssStateResyncNotification(
 static void chppGnssLocationResultNotification(
     struct ChppGnssClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
+  CHPP_LOGD("chppGnssLocationResultNotification received data len=%" PRIuSIZE,
+            len);
 
-  if (len < sizeof(struct ChppGnssLocationEventWithHeader)) {
-    CHPP_LOGE("GNSS LocationResultNotification too short");
+  buf += sizeof(struct ChppAppHeader);
+  len -= sizeof(struct ChppAppHeader);
 
+  struct chreGnssLocationEvent *chre =
+      chppGnssLocationEventToChre((struct ChppGnssLocationEvent *)buf, len);
+
+  if (chre == NULL) {
+    CHPP_LOGE(
+        "chppGnssLocationResultNotification CHPP -> CHRE conversion failed. "
+        "Input len=%" PRIuSIZE,
+        len);
   } else {
-    CHPP_LOGD("chppGnssLocationResultNotification received location");
-
-    // TODO: Use parser script instead. i.e. chppGnssLocationEventToChre()
-    struct ChppGnssLocationEventWithHeader *chppEvent =
-        (struct ChppGnssLocationEventWithHeader *)buf;
-    struct chreGnssLocationEvent *chreResult =
-        chppMalloc(sizeof(struct chreGnssLocationEvent));
-
-    if (chreResult == NULL) {
-      CHPP_LOG_OOM();
-
-    } else {
-      memcpy(chreResult, &chppEvent->payload,
-             sizeof(struct ChppGnssLocationEvent));
-      gCallbacks->locationEventCallback(chreResult);
-    }
+    gCallbacks->locationEventCallback(chre);
   }
 }
 
@@ -480,11 +475,24 @@ static void chppGnssLocationResultNotification(
 static void chppGnssMeasurementResultNotification(
     struct ChppGnssClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
-  UNUSED_VAR(buf);
-  UNUSED_VAR(len);
-  // TODO: Use parser script, i.e. chppGnssMeasurementEventToChre(), to convert
+  CHPP_LOGD(
+      "chppGnssMeasurementResultNotification received data len=%" PRIuSIZE,
+      len);
 
-  // gCallbacks->measurementEventCallback(chreResult);
+  buf += sizeof(struct ChppAppHeader);
+  len -= sizeof(struct ChppAppHeader);
+
+  struct chreGnssDataEvent *chre =
+      chppGnssDataEventToChre((struct ChppGnssDataEvent *)buf, len);
+
+  if (chre == NULL) {
+    CHPP_LOGE(
+        "chppGnssMeasurementResultNotification CHPP -> CHRE conversion failed. "
+        "Input len=%" PRIuSIZE,
+        len);
+  } else {
+    gCallbacks->measurementEventCallback(chre);
+  }
 }
 
 /**
@@ -521,9 +529,9 @@ static bool chppGnssClientOpen(const struct chrePalSystemApi *systemApi,
       CHPP_LOG_OOM();
     } else {
       // Send request and wait for service response
-      result = chppSendTimestampedRequestAndWait(
-          &gGnssClientContext.client, &gGnssClientContext.open, request,
-          sizeof(struct ChppAppHeader));
+      result = chppSendTimestampedRequestAndWait(&gGnssClientContext.client,
+                                                 &gGnssClientContext.open,
+                                                 request, sizeof(*request));
     }
   }
 
@@ -533,7 +541,7 @@ static bool chppGnssClientOpen(const struct chrePalSystemApi *systemApi,
 /**
  * Deinitializes the GNSS client.
  */
-static void chppGnssClientClose() {
+static void chppGnssClientClose(void) {
   // Remote
   struct ChppAppHeader *request = chppAllocClientRequestCommand(
       &gGnssClientContext.client, CHPP_GNSS_CLOSE);
@@ -543,7 +551,7 @@ static void chppGnssClientClose() {
   } else {
     chppSendTimestampedRequestAndWait(&gGnssClientContext.client,
                                       &gGnssClientContext.close, request,
-                                      sizeof(struct ChppAppHeader));
+                                      sizeof(*request));
   }
   // Local
   gGnssClientContext.capabilities = CHRE_GNSS_CAPABILITIES_NONE;
@@ -555,7 +563,7 @@ static void chppGnssClientClose() {
  *
  * @return Capabilities flags.
  */
-static uint32_t chppGnssClientGetCapabilities() {
+static uint32_t chppGnssClientGetCapabilities(void) {
   uint32_t capabilities = CHRE_GNSS_CAPABILITIES_NONE;
 
   if (gGnssClientContext.capabilities != CHRE_GNSS_CAPABILITIES_NONE) {
@@ -569,9 +577,9 @@ static uint32_t chppGnssClientGetCapabilities() {
     if (request == NULL) {
       CHPP_LOG_OOM();
     } else {
-      if (chppSendTimestampedRequestAndWait(
-              &gGnssClientContext.client, &gGnssClientContext.getCapabilities,
-              request, sizeof(struct ChppAppHeader))) {
+      if (chppSendTimestampedRequestAndWait(&gGnssClientContext.client,
+                                            &gGnssClientContext.getCapabilities,
+                                            request, sizeof(*request))) {
         // Success. gGnssClientContext.capabilities is now populated
         capabilities = gGnssClientContext.capabilities;
       }
@@ -612,7 +620,7 @@ static bool chppGnssClientControlLocationSession(bool enable,
 
     result = chppSendTimestampedRequestOrFail(
         &gGnssClientContext.client, &gGnssClientContext.controlLocationSession,
-        request, sizeof(struct ChppGnssControlLocationSessionRequest));
+        request, sizeof(*request));
   }
 
   return result;
@@ -658,7 +666,7 @@ static bool chppGnssClientControlMeasurementSession(bool enable,
     result = chppSendTimestampedRequestOrFail(
         &gGnssClientContext.client,
         &gGnssClientContext.controlMeasurementSession, request,
-        sizeof(struct ChppGnssControlMeasurementSessionRequest));
+        sizeof(*request));
   }
 
   return result;
@@ -698,8 +706,7 @@ static bool chppGnssClientConfigurePassiveLocationListener(bool enable) {
 
     result = chppSendTimestampedRequestOrFail(
         &gGnssClientContext.client, &gGnssClientContext.passiveLocationListener,
-        request,
-        sizeof(struct ChppGnssConfigurePassiveLocationListenerRequest));
+        request, sizeof(*request));
   }
 
   return result;

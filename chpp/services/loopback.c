@@ -22,8 +22,8 @@
 #include <string.h>
 
 #include "chpp/app.h"
+#include "chpp/log.h"
 #include "chpp/memory.h"
-#include "chpp/platform/log.h"
 #include "chpp/transport.h"
 
 /************************************************
@@ -34,7 +34,7 @@ bool chppDispatchLoopbackClientRequest(struct ChppAppState *context,
                                        uint8_t *buf, size_t len) {
   uint8_t *response = chppMalloc(len);
   if (response == NULL) {
-    CHPP_LOG_OOM("Loopback response of %" PRIuSIZE " bytes", len);
+    CHPP_LOG_OOM();
     chppEnqueueTxErrorDatagram(context->transportContext,
                                CHPP_TRANSPORT_ERROR_OOM);
 

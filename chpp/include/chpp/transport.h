@@ -81,7 +81,7 @@ extern "C" {
  * To be safe, this should be less than half of the maximum uint8_t value.
  * Otherwise, ChppTxDatagramQueue should be updated accordingly.
  */
-#define CHPP_TX_DATAGRAM_QUEUE_LEN 16
+#define CHPP_TX_DATAGRAM_QUEUE_LEN ((uint8_t)16)
 
 /**
  * Maximum payload of packets at the link layer.
@@ -89,16 +89,18 @@ extern "C" {
  * transport TX MTU of 1024.
  */
 #define CHPP_LINK_TX_MTU_BYTES                                               \
-  MIN(CHPP_PLATFORM_LINK_TX_MTU_BYTES,                                       \
+  ((uint16_t)MIN(                                                            \
+      CHPP_PLATFORM_LINK_TX_MTU_BYTES,                                       \
       (1024 + CHPP_PREAMBLE_LEN_BYTES + sizeof(struct ChppTransportHeader) + \
-       sizeof(struct ChppTransportFooter)))
+       sizeof(struct ChppTransportFooter))))
 
 /**
  * Maximum payload of packets at the transport layer.
  */
-#define CHPP_TRANSPORT_TX_MTU_BYTES                   \
-  (CHPP_LINK_TX_MTU_BYTES - CHPP_PREAMBLE_LEN_BYTES - \
-   sizeof(struct ChppTransportHeader) - sizeof(struct ChppTransportFooter))
+#define CHPP_TRANSPORT_TX_MTU_BYTES                              \
+  ((uint16_t)(CHPP_LINK_TX_MTU_BYTES - CHPP_PREAMBLE_LEN_BYTES - \
+              sizeof(struct ChppTransportHeader) -               \
+              sizeof(struct ChppTransportFooter)))
 
 /************************************************
  *  Status variables to store context in lieu of global variables (this)
@@ -142,6 +144,8 @@ enum ChppTransportErrorCode {
   ((enum ChppTransportPacketAttributes)( \
       (value)&CHPP_TRANSPORT_ATTR_MASK))  // TODO: Consider checking if this
                                           // maps into a valid enum
+#define CHPP_TRANSPORT_SET_ATTR(code, value) \
+  code = ((code & CHPP_TRANSPORT_ERROR_MASK) | value)
 enum ChppTransportPacketAttributes {
   //! None
   CHPP_TRANSPORT_ATTR_NONE = CHPP_TRANSPORT_ATTR_VALUE(0),
@@ -149,7 +153,14 @@ enum ChppTransportPacketAttributes {
   CHPP_TRANSPORT_ATTR_RESET = CHPP_TRANSPORT_ATTR_VALUE(1),
   //! Reset Ack
   CHPP_TRANSPORT_ATTR_RESET_ACK = CHPP_TRANSPORT_ATTR_VALUE(2),
+  //! Transport-Layer Loopback Request
+  CHPP_TRANSPORT_ATTR_LOOPBACK_REQUEST = CHPP_TRANSPORT_ATTR_VALUE(3),
+  //! Transport-Layer Loopback Response
+  CHPP_TRANSPORT_ATTR_LOOPBACK_RESPONSE = CHPP_TRANSPORT_ATTR_VALUE(4),
 };
+
+#define CHPP_ATTR_AND_ERROR_TO_PACKET_CODE(attr, error) \
+  ((uint8_t)(attr) | (uint8_t)(error))
 
 /**
  * CHPP Transport Layer header (not including the preamble)
@@ -182,8 +193,7 @@ CHPP_PACKED_END
  */
 CHPP_PACKED_START
 struct ChppTransportFooter {
-  // Checksum algo TBD. Maybe IEEE CRC-32?
-  uint32_t checksum;
+  uint32_t checksum;  // IEEE CRC-32 initialized to 0xFFFFFFFF
 } CHPP_PACKED_ATTR;
 CHPP_PACKED_END
 
@@ -341,6 +351,8 @@ struct ChppTransportState {
   struct ChppTransportHeader rxHeader;  // Rx packet header
   struct ChppTransportFooter rxFooter;  // Rx packet footer (checksum)
   struct ChppDatagram rxDatagram;       // Rx datagram
+  uint8_t loopbackResult;  // Last transport-layer loopback test result as an
+                           // enum ChppAppErrorCode
 
   struct ChppTxStatus txStatus;                // Tx state
   struct ChppTxDatagramQueue txDatagramQueue;  // Queue of datagrams to be Tx
@@ -482,6 +494,27 @@ void chppEnqueueTxErrorDatagram(struct ChppTransportState *context,
 void chppWorkThreadStart(struct ChppTransportState *context);
 
 /**
+ * Handles signals set for the CHPP transport instance. This method should be
+ * invoked externally if chppWorkThreadStart() cannot be directly used, for
+ * example if the system does not support thread signaling and needs explicit
+ * control of the CHPP work thread from an outer control loop. By "outer control
+ * loop," we mean the code path triggering work on the CHPP transport layer.
+ *
+ * Note that if a platform uses this method, the outer control loop MUST
+ * replicate the behavior in the chppWorkThreadStart() method exactly. All
+ * pending signals MUST be handled prior to the suspension of the outer control
+ * loop, and any initialization sequence MUST be replicated.
+ *
+ * @param context Maintains status for each transport layer instance.
+ * @params signals The signals to process. Should be obtained via
+ * chppNotifierWait() for the given transport context's notifier.
+ *
+ * @return true if the CHPP work thread should exit.
+ */
+bool chppWorkThreadHandleSignal(struct ChppTransportState *context,
+                                uint32_t signals);
+
+/**
  * Signals the main thread for CHPP's Transport Layer to perform some work. This
  * method should only be called from the link layer.
  *
@@ -540,6 +573,36 @@ void chppLinkSendDoneCb(struct ChppPlatformLinkParameters *params,
  * @param buf Pointer to the buf given to chppProcessRxDatagram. Cannot be null.
  */
 void chppAppProcessDoneCb(struct ChppTransportState *context, uint8_t *buf);
+
+/*
+ * Sends out transport-layer loopback data. Note that in most situations, an
+ * application-layer loopback test is pprefrable as it is more thorough and
+ * provides statistics regarding the correctness of the loopbacked data.
+ *
+ * The result will be available later, asynchronously, as a ChppAppErrorCode
+ * enum in context->loopbackResult.
+ *
+ * @param context Maintains status for each transport layer instance.
+ * @param buf Pointer to the loopback data to be sent. Cannot be null.
+ * @param len Length of the loopback data.
+ */
+void chppRunTransportLoopback(struct ChppTransportState *context, uint8_t *buf,
+                              size_t len);
+/**
+ * Sends a reset or reset-ack packet over the link in order to reset the remote
+ * side or inform the counterpart of a reset, respectively. The transport
+ * layer's configuration is sent as the payload of the reset packet.
+ *
+ * This function is used immediately after initialization, for example upon boot
+ * (to send a reset), or when a reset packet is received and acted upon (to send
+ * a reset-ack).
+ *
+ * @param transportContext Maintains status for each transport layer instance.
+ * @param resetType Distinguishes a reset from a reset-ack, as defined in the
+ * ChppTransportPacketAttributes struct.
+ */
+void chppTransportSendReset(struct ChppTransportState *context,
+                            enum ChppTransportPacketAttributes resetType);
 
 #ifdef __cplusplus
 }

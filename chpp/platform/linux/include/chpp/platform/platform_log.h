@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef CHPP_LOG_H_
-#define CHPP_LOG_H_
+#ifndef CHPP_PLATFORM_LOG_H_
+#define CHPP_PLATFORM_LOG_H_
 
 #include <inttypes.h>
 #include <pthread.h>
@@ -48,11 +48,8 @@ extern "C" {
 #define CHPP_LOGI(fmt, ...) CHPP_LINUX_LOG("I", "96", fmt, ##__VA_ARGS__)
 #define CHPP_LOGD(fmt, ...) CHPP_LINUX_LOG("D", "97", fmt, ##__VA_ARGS__)
 
-#define CHPP_LOG_OOM(fmt, ...) \
-  CHPP_LINUX_LOG("E", "91", "CHPP OOM: " fmt, ##__VA_ARGS__)
-
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // CHPP_LOG_H_
+#endif  // CHPP_PLATFORM_LOG_H_

@@ -559,7 +559,7 @@ void SensorRequestManager::logStateToBuffer(DebugDumpWrapper &debugDump) const {
       // below
       debugDump.print(
           " %s: mode=%d int=%" PRIu64 " lat=%" PRIu64 " nappId=%" PRIu32 "\n",
-          mSensors[i].getSensorTypeName(), request.getMode(),
+          mSensors[i].getSensorTypeName(), static_cast<int>(request.getMode()),
           request.getInterval().toRawNanoseconds(),
           request.getLatency().toRawNanoseconds(), request.getInstanceId());
     }
@@ -804,15 +804,12 @@ uint8_t SensorRequestManager::makeFlushRequest(FlushRequest &request) {
       Nanoseconds delay = deadline - now;
       request.isActive = true;
 
-      NestedDataPtr<uint32_t> index(request.sensorHandle);
-
       auto callback = [](uint16_t /* eventType */, void *eventData) {
-        LOGE("Flush request timed out.");
-        NestedDataPtr<uint32_t> nestedIndex;
-        nestedIndex.dataPtr = eventData;
+        LOGE("Flush request timed out");
+        NestedDataPtr<uint32_t> sensorHandle(eventData);
         EventLoopManagerSingleton::get()
             ->getSensorRequestManager()
-            .onFlushTimeout(nestedIndex.data);
+            .onFlushTimeout(sensorHandle);
 
         // Send a complete event, thus closing out this flush request. If the
         // request that has just timed out receives a response later, this may
@@ -822,13 +819,13 @@ uint8_t SensorRequestManager::makeFlushRequest(FlushRequest &request) {
         // responses can be properly dropped.
         EventLoopManagerSingleton::get()
             ->getSensorRequestManager()
-            .handleFlushCompleteEventSync(CHRE_ERROR_TIMEOUT, nestedIndex.data);
+            .handleFlushCompleteEventSync(CHRE_ERROR_TIMEOUT, sensorHandle);
       };
 
       sensor.setFlushRequestTimerHandle(
           EventLoopManagerSingleton::get()->setDelayedCallback(
-              SystemCallbackType::SensorFlushTimeout, index.dataPtr, callback,
-              delay));
+              SystemCallbackType::SensorFlushTimeout,
+              NestedDataPtr<uint32_t>(request.sensorHandle), callback, delay));
     }
   } else {
     // Flush request will be made once the pending request is completed.

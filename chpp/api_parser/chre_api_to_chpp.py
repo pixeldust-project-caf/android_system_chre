@@ -42,8 +42,8 @@ LICENSE_HEADER = """/*
 """
 
 # Paths for output, relative to system/chre
-CHPP_SERVICE_INCLUDE_PATH = "chpp/include/chpp/services"
-CHPP_SERVICE_SOURCE_PATH = "chpp/services"
+CHPP_PARSER_INCLUDE_PATH = "chpp/include/chpp/common"
+CHPP_PARSER_SOURCE_PATH = "chpp/common"
 
 
 def system_chre_abs_path():
@@ -338,7 +338,7 @@ class CodeGenerator:
         """Generates #include directives for the conversion source file"""
         out = ["#include \"chpp/macros.h\"\n"
                "#include \"chpp/memory.h\"\n"
-               "#include \"chpp/services/{}_types.h\"\n\n".format(self.service_name)]
+               "#include \"chpp/common/{}_types.h\"\n\n".format(self.service_name)]
         out.append("#include <stddef.h>\n#include <stdint.h>\n#include <string.h>\n\n")
         return out
 
@@ -376,8 +376,9 @@ class CodeGenerator:
             member_info['name'], annotation['length_field'],
             self._get_chpp_member_sizeof_call(member_info)))
 
-        out.append("  CHPP_ASSERT(*vlaOffset + out->{}.length <= payloadSize);\n".format(
+        out.append("  CHPP_ASSERT((size_t)(*vlaOffset + out->{}.length) <= payloadSize);\n".format(
             member_info['name']))
+
         out.append("  if (out->{}.length > 0 &&\n"
                    "      *vlaOffset + out->{}.length <= payloadSize) {{\n".format(
             member_info['name'], member_info['name']))
@@ -713,8 +714,10 @@ class CodeGenerator:
         out.append("      return false;\n")
         out.append("    }\n\n")
 
-        out.append("    {} *{}In = ({} *) &((uint8_t *)in)[in->{}.offset];\n".format(
-            chpp_type, variable_name, chpp_type, variable_name))
+        out.append("    const {} *{}In =\n".format(
+            chpp_type, variable_name))
+        out.append("        (const {} *) &((const uint8_t *)in)[in->{}.offset];\n".format(
+            chpp_type, variable_name))
 
         out.append("    {} *{}Out = chppMalloc(in->{} * sizeof({}));\n".format(
             chre_type, variable_name, annotation['length_field'], chre_type))
@@ -812,7 +815,7 @@ class CodeGenerator:
         filename = self.service_name + "_types.h"
         if not dry_run:
             print("Generating {} ... ".format(filename), end='', flush=True)
-        output_file = os.path.join(system_chre_abs_path(), CHPP_SERVICE_INCLUDE_PATH, filename)
+        output_file = os.path.join(system_chre_abs_path(), CHPP_PARSER_INCLUDE_PATH, filename)
         header = self.generate_header_string()
         self._dump_to_file(output_file, header, dry_run, skip_clang_format)
         if not dry_run:
@@ -848,7 +851,7 @@ class CodeGenerator:
         if not dry_run:
             print("Generating {} ... ".format(filename), end='', flush=True)
         contents = self.generate_conversion_string()
-        output_file = os.path.join(system_chre_abs_path(), CHPP_SERVICE_SOURCE_PATH, filename)
+        output_file = os.path.join(system_chre_abs_path(), CHPP_PARSER_SOURCE_PATH, filename)
         self._dump_to_file(output_file, contents, dry_run, skip_clang_format)
         if not dry_run:
             print("done")

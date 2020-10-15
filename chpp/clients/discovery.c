@@ -23,9 +23,9 @@
 
 #include "chpp/app.h"
 #include "chpp/common/discovery.h"
+#include "chpp/log.h"
 #include "chpp/macros.h"
 #include "chpp/memory.h"
-#include "chpp/platform/log.h"
 #include "chpp/transport.h"
 
 /************************************************
@@ -76,7 +76,7 @@ static uint8_t chppFindMatchingClient(
     struct ChppAppState *context, const struct ChppServiceDescriptor *service) {
   uint8_t result = CHPP_CLIENT_INDEX_NONE;
 
-  for (size_t i = 0; i < context->registeredClientCount; i++) {
+  for (uint8_t i = 0; i < context->registeredClientCount; i++) {
     if (chppIsClientCompatibleWithService(
             &context->registeredClients[i]->descriptor, service)) {
       result = i;
@@ -100,9 +100,10 @@ static void chppDiscoveryProcessDiscoverAll(struct ChppAppState *context,
   CHPP_DEBUG_ASSERT(len >= sizeof(struct ChppAppHeader));
 
   const struct ChppDiscoveryResponse *response =
-      (struct ChppDiscoveryResponse *)buf;
+      (const struct ChppDiscoveryResponse *)buf;
   size_t servicesLen = len - sizeof(struct ChppAppHeader);
-  uint8_t serviceCount = servicesLen / sizeof(struct ChppServiceDescriptor);
+  uint8_t serviceCount =
+      (uint8_t)(servicesLen / sizeof(struct ChppServiceDescriptor));
 
   if (servicesLen != serviceCount * sizeof(struct ChppServiceDescriptor)) {
     // Incomplete service list
@@ -235,7 +236,7 @@ bool chppWaitForDiscoveryComplete(struct ChppAppState *context,
 
 bool chppDispatchDiscoveryServiceResponse(struct ChppAppState *context,
                                           const uint8_t *buf, size_t len) {
-  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+  const struct ChppAppHeader *rxHeader = (const struct ChppAppHeader *)buf;
   bool success = true;
 
   switch (rxHeader->command) {
@@ -266,5 +267,5 @@ void chppInitiateDiscovery(struct ChppAppState *context) {
   chppMutexUnlock(&context->discoveryMutex);
 
   chppEnqueueTxDatagramOrFail(context->transportContext, request,
-                              sizeof(struct ChppAppHeader));
+                              sizeof(*request));
 }

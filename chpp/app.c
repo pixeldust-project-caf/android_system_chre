@@ -28,10 +28,10 @@
 #ifdef CHPP_CLIENT_ENABLED_LOOPBACK
 #include "chpp/clients/loopback.h"
 #endif
+#include "chpp/log.h"
 #include "chpp/macros.h"
 #include "chpp/notifier.h"
 #include "chpp/pal_api.h"
-#include "chpp/platform/log.h"
 #include "chpp/services.h"
 #include "chpp/services/discovery.h"
 #include "chpp/services/loopback.h"
@@ -519,7 +519,8 @@ static void chppProcessNegotiatedHandleDatagram(struct ChppAppState *context,
         if (messageType == CHPP_MESSAGE_TYPE_CLIENT_REQUEST) {
           struct ChppAppHeader *response =
               chppAllocServiceResponseFixed(rxHeader, struct ChppAppHeader);
-          response->error = error;
+          response->error = CHPP_ATTR_AND_ERROR_TO_PACKET_CODE(
+              CHPP_TRANSPORT_ATTR_NONE, error);
           chppEnqueueTxDatagramOrFail(context->transportContext, response,
                                       sizeof(*response));
         }
@@ -585,8 +586,12 @@ void chppAppInitWithClientServiceSet(
   chppDiscoveryInit(appContext);
 #endif  // CHPP_CLIENT_ENABLED_DISCOVERY
   chppPalSystemApiInit(appContext);
+#ifdef CHPP_SERVICE_ENABLED
   chppRegisterCommonServices(appContext);
+#endif
+#ifdef CHPP_CLIENT_ENABLED
   chppRegisterCommonClients(appContext);
+#endif
 }
 
 void chppAppDeinit(struct ChppAppState *appContext) {
@@ -605,8 +610,12 @@ void chppAppDeinitTransient(struct ChppAppState *appContext) {
 
   CHPP_LOGI("Deinitializing the CHPP app layer");
 
+#ifdef CHPP_CLIENT_ENABLED
   chppDeregisterCommonClients(appContext);
+#endif
+#ifdef CHPP_SERVICE_ENABLED
   chppDeregisterCommonServices(appContext);
+#endif
   chppPalSystemApiDeinit(appContext);
 }
 

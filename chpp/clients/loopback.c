@@ -23,8 +23,8 @@
 
 #include "chpp/app.h"
 #include "chpp/clients.h"
+#include "chpp/log.h"
 #include "chpp/memory.h"
-#include "chpp/platform/log.h"
 #include "chpp/transport.h"
 
 /************************************************
@@ -49,7 +49,7 @@ struct ChppLoopbackClientState {
 
 // Note: This global definition of gLoopbackClientContext supports only one
 // instance of the CHPP loopback client at a time.
-struct ChppLoopbackClientState gLoopbackClientContext = {};
+struct ChppLoopbackClientState gLoopbackClientContext;
 
 /************************************************
  *  Public Functions
@@ -61,7 +61,7 @@ void chppLoopbackClientInit(struct ChppAppState *context) {
   gLoopbackClientContext.testResult.error = CHPP_APP_ERROR_NONE;
 }
 
-void chppLoopbackClientDeinit() {
+void chppLoopbackClientDeinit(void) {
   chppClientDeinit(&gLoopbackClientContext.client);
 }
 
@@ -73,7 +73,7 @@ bool chppDispatchLoopbackServiceResponse(struct ChppAppState *context,
   CHPP_NOT_NULL(gLoopbackClientContext.loopbackData);
 
   chppClientTimestampResponse(&gLoopbackClientContext.runLoopbackTest,
-                              (struct ChppAppHeader *)response);
+                              (const struct ChppAppHeader *)response);
 
   gLoopbackClientContext.testResult.error = CHPP_APP_ERROR_NONE;
   gLoopbackClientContext.testResult.responseLen = len;

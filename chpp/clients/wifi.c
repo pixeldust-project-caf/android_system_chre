@@ -27,10 +27,10 @@
 #include "chpp/clients/discovery.h"
 #include "chpp/common/standard_uuids.h"
 #include "chpp/common/wifi.h"
+#include "chpp/common/wifi_types.h"
+#include "chpp/log.h"
 #include "chpp/macros.h"
 #include "chpp/memory.h"
-#include "chpp/platform/log.h"
-#include "chpp/services/wifi_types.h"
 #include "chre/pal/wifi.h"
 #include "chre_api/chre/wifi.h"
 
@@ -113,8 +113,8 @@ static const struct chrePalWifiCallbacks *gCallbacks;
 
 static bool chppWifiClientOpen(const struct chrePalSystemApi *systemApi,
                                const struct chrePalWifiCallbacks *callbacks);
-static void chppWifiClientClose();
-static uint32_t chppWifiClientGetCapabilities();
+static void chppWifiClientClose(void);
+static uint32_t chppWifiClientGetCapabilities(void);
 static bool chppWifiClientConfigureScanMonitor(bool enable);
 static bool chppWifiClientRequestScan(const struct chreWifiScanParams *params);
 static void chppWifiClientReleaseScanEvent(struct chreWifiScanEvent *event);
@@ -374,11 +374,22 @@ static void chppWifiConfigureScanMonitorResult(
 static void chppWifiScanEventNotification(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
-  UNUSED_VAR(buf);
-  UNUSED_VAR(len);
+  CHPP_LOGD("chppWifiScanEventNotification received data len=%" PRIuSIZE, len);
 
-  // TODO: Use auto-generated parser to convert, i.e. chppWifiScanEventToChre()
-  // gCallbacks->scanEventCallback(chreResult);
+  buf += sizeof(struct ChppAppHeader);
+  len -= sizeof(struct ChppAppHeader);
+
+  struct chreWifiScanEvent *chre =
+      chppWifiScanEventToChre((struct ChppWifiScanEvent *)buf, len);
+
+  if (chre == NULL) {
+    CHPP_LOGE(
+        "chppWifiScanEventNotification CHPP -> CHRE conversion failed. Input "
+        "len=%" PRIuSIZE,
+        len);
+  } else {
+    gCallbacks->scanEventCallback(chre);
+  }
 }
 
 /**
@@ -435,9 +446,9 @@ static bool chppWifiClientOpen(const struct chrePalSystemApi *systemApi,
       CHPP_LOG_OOM();
     } else {
       // Send request and wait for service response
-      result = chppSendTimestampedRequestAndWait(
-          &gWifiClientContext.client, &gWifiClientContext.open, request,
-          sizeof(struct ChppAppHeader));
+      result = chppSendTimestampedRequestAndWait(&gWifiClientContext.client,
+                                                 &gWifiClientContext.open,
+                                                 request, sizeof(*request));
     }
   }
 
@@ -447,7 +458,7 @@ static bool chppWifiClientOpen(const struct chrePalSystemApi *systemApi,
 /**
  * Deinitializes the WiFi client.
  */
-static void chppWifiClientClose() {
+static void chppWifiClientClose(void) {
   // Remote
   struct ChppAppHeader *request = chppAllocClientRequestCommand(
       &gWifiClientContext.client, CHPP_WIFI_CLOSE);
@@ -457,7 +468,7 @@ static void chppWifiClientClose() {
   } else {
     chppSendTimestampedRequestAndWait(&gWifiClientContext.client,
                                       &gWifiClientContext.close, request,
-                                      sizeof(struct ChppAppHeader));
+                                      sizeof(*request));
   }
   // Local
   gWifiClientContext.capabilities = CHRE_WIFI_CAPABILITIES_NONE;
@@ -469,7 +480,7 @@ static void chppWifiClientClose() {
  *
  * @return Capabilities flags.
  */
-static uint32_t chppWifiClientGetCapabilities() {
+static uint32_t chppWifiClientGetCapabilities(void) {
   uint32_t capabilities = CHRE_WIFI_CAPABILITIES_NONE;
 
   if (gWifiClientContext.capabilities != CHRE_WIFI_CAPABILITIES_NONE) {
@@ -483,9 +494,9 @@ static uint32_t chppWifiClientGetCapabilities() {
     if (request == NULL) {
       CHPP_LOG_OOM();
     } else {
-      if (chppSendTimestampedRequestAndWait(
-              &gWifiClientContext.client, &gWifiClientContext.getCapabilities,
-              request, sizeof(struct ChppAppHeader))) {
+      if (chppSendTimestampedRequestAndWait(&gWifiClientContext.client,
+                                            &gWifiClientContext.getCapabilities,
+                                            request, sizeof(*request))) {
         // Success. gWifiClientContext.capabilities is now populated
         capabilities = gWifiClientContext.capabilities;
       }
@@ -519,7 +530,7 @@ static bool chppWifiClientConfigureScanMonitor(bool enable) {
 
     result = chppSendTimestampedRequestOrFail(
         &gWifiClientContext.client, &gWifiClientContext.configureScanMonitor,
-        request, sizeof(struct ChppWifiConfigureScanMonitorAsyncRequest));
+        request, sizeof(*request));
   }
 
   return result;
