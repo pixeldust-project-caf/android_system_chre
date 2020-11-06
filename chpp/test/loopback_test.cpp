@@ -24,6 +24,7 @@
 #include "app_test_base.h"
 #include "chpp/app.h"
 #include "chpp/clients/loopback.h"
+#include "chpp/clients/timesync.h"
 #include "chpp/log.h"
 #include "chpp/transport.h"
 
@@ -47,28 +48,36 @@ TEST_F(AppTestBase, TransportLayerLoopback) {
     buf[i] = (uint8_t)(i + 100);
   }
 
-  std::this_thread::sleep_for(std::chrono::seconds(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
   CHPP_LOGI("Starting transport-layer loopback test (max buffer = %zu)...",
             kTestLen);
 
-  chppRunTransportLoopback(mClientAppContext.transportContext, buf, kTestLen);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(CHPP_APP_ERROR_NONE,
+            chppRunTransportLoopback(mClientAppContext.transportContext, buf,
+                                     kTestLen));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_EQ(CHPP_APP_ERROR_NONE,
             mClientAppContext.transportContext->loopbackResult);
 
-  chppRunTransportLoopback(mClientAppContext.transportContext, buf, 100);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(
+      CHPP_APP_ERROR_NONE,
+      chppRunTransportLoopback(mClientAppContext.transportContext, buf, 100));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_EQ(CHPP_APP_ERROR_NONE,
             mClientAppContext.transportContext->loopbackResult);
 
-  chppRunTransportLoopback(mClientAppContext.transportContext, buf, 1);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(
+      CHPP_APP_ERROR_NONE,
+      chppRunTransportLoopback(mClientAppContext.transportContext, buf, 1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
   EXPECT_EQ(CHPP_APP_ERROR_NONE,
             mClientAppContext.transportContext->loopbackResult);
 
-  chppRunTransportLoopback(mClientAppContext.transportContext, buf, 0);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  EXPECT_EQ(CHPP_APP_ERROR_NONE,
+  EXPECT_EQ(
+      CHPP_APP_ERROR_INVALID_LENGTH,
+      chppRunTransportLoopback(mClientAppContext.transportContext, buf, 0));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  EXPECT_EQ(CHPP_APP_ERROR_INVALID_LENGTH,
             mClientAppContext.transportContext->loopbackResult);
 }
 
@@ -123,6 +132,24 @@ TEST_F(AppTestBase, FragmentedLoopback) {
       &mClientAppContext, buf,
       CHPP_TRANSPORT_TX_MTU_BYTES - CHPP_LOOPBACK_HEADER_LEN + 1);
   EXPECT_EQ(result.error, CHPP_APP_ERROR_NONE);
+}
+
+TEST_F(AppTestBase, Timesync) {
+  constexpr uint64_t kMaxRtt = 2 * CHPP_NSEC_PER_MSEC;    // in ms
+  constexpr int64_t kMaxOffset = 1 * CHPP_NSEC_PER_MSEC;  // in ms
+
+  CHPP_LOGI("Starting timesync test...");
+
+  struct ChppTimesyncResult result = chppGetTimesync(&mClientAppContext);
+
+  EXPECT_EQ(result.error, CHPP_APP_ERROR_NONE);
+
+  EXPECT_LT(result.rttNs, kMaxRtt);
+  EXPECT_NE(result.rttNs, 0);
+
+  EXPECT_LT(result.offsetNs, kMaxOffset);
+  EXPECT_GT(result.offsetNs, -kMaxOffset);
+  EXPECT_NE(result.offsetNs, 0);
 }
 
 }  // namespace

@@ -143,11 +143,11 @@ void HostCommsManager::sendMessageToNanoappFromHost(uint64_t appId,
            "(size %zu)",
            appId, messageSize);
     } else if (!deliverNanoappMessageFromHost(craftedMessage)) {
-      LOGD("Deferring message; destination app ID 0x%016" PRIx64
+      LOGV("Deferring message; destination app ID 0x%016" PRIx64
            " not found at this time",
            appId);
 
-      auto deferredMessageCallback = [](uint16_t /*type*/, void *data) {
+      auto callback = [](uint16_t /*type*/, void *data, void * /*extraData*/) {
         EventLoopManagerSingleton::get()
             ->getHostCommsManager()
             .sendDeferredMessageToNanoappFromHost(
@@ -155,7 +155,7 @@ void HostCommsManager::sendMessageToNanoappFromHost(uint64_t appId,
       };
       EventLoopManagerSingleton::get()->deferCallback(
           SystemCallbackType::DeferredMessageToNanoappFromHost, craftedMessage,
-          deferredMessageCallback);
+          callback);
     }
   }
 }
@@ -191,7 +191,8 @@ void HostCommsManager::onMessageToHostComplete(const MessageToHost *message) {
   if (msgToHost->toHostData.nanoappFreeFunction == nullptr) {
     mMessagePool.deallocate(msgToHost);
   } else {
-    auto freeMsgCallback = [](uint16_t /*type*/, void *data) {
+    auto freeMsgCallback = [](uint16_t /*type*/, void *data,
+                              void * /*extraData*/) {
       EventLoopManagerSingleton::get()->getHostCommsManager().freeMessageToHost(
           static_cast<MessageToHost *>(data));
     };

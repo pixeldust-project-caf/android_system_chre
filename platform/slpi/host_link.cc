@@ -37,6 +37,7 @@
 #include "chre/util/fixed_size_blocking_queue.h"
 #include "chre/util/flatbuffers/helpers.h"
 #include "chre/util/macros.h"
+#include "chre/util/nested_data_ptr.h"
 #include "chre/util/unique_ptr.h"
 #include "chre_api/chre/version.h"
 
@@ -52,14 +53,6 @@ constexpr size_t kOutboundQueueSize = 32;
 //! The last time a time sync request message has been sent.
 //! TODO: Make this a member of HostLinkBase
 Nanoseconds gLastTimeSyncRequestNanos(0);
-
-//! Used to pass the client ID through the user data pointer in deferCallback
-union HostClientIdCallbackData {
-  uint16_t hostClientId;
-  void *ptr;
-};
-static_assert(sizeof(uint16_t) <= sizeof(void *),
-              "Pointer must at least fit a u16 for passing the host client ID");
 
 struct LoadNanoappCallbackData {
   uint64_t appId;
@@ -213,7 +206,7 @@ bool buildAndEnqueueMessage(PendingMessageType msgType,
 }
 
 /**
- * FlatBuffer message builder callback used with constructNanoappListCallback()
+ * FlatBuffer message builder callback used with handleNanoappListRequest()
  */
 void buildNanoappListResponse(ChreFlatBufferBuilder &builder, void *cookie) {
   auto nanoappAdderCallback = [](const Nanoapp *nanoapp, void *data) {
@@ -232,30 +225,8 @@ void buildNanoappListResponse(ChreFlatBufferBuilder &builder, void *cookie) {
                                               cbData->hostClientId);
 }
 
-void constructNanoappListCallback(uint16_t /*eventType*/, void *deferCbData) {
-  HostClientIdCallbackData clientIdCbData;
-  clientIdCbData.ptr = deferCbData;
-
-  NanoappListData cbData = {};
-  cbData.hostClientId = clientIdCbData.hostClientId;
-
-  const EventLoop &eventLoop = EventLoopManagerSingleton::get()->getEventLoop();
-  size_t expectedNanoappCount = eventLoop.getNanoappCount();
-  if (!cbData.nanoappEntries.reserve(expectedNanoappCount)) {
-    LOG_OOM();
-  } else {
-    constexpr size_t kFixedOverhead = 48;
-    constexpr size_t kPerNanoappSize = 32;
-    size_t initialBufferSize =
-        (kFixedOverhead + expectedNanoappCount * kPerNanoappSize);
-
-    buildAndEnqueueMessage(PendingMessageType::NanoappListResponse,
-                           initialBufferSize, buildNanoappListResponse,
-                           &cbData);
-  }
-}
-
-void finishLoadingNanoappCallback(uint16_t /*eventType*/, void *data) {
+void finishLoadingNanoappCallback(SystemCallbackType /*type*/,
+                                  UniquePtr<LoadNanoappCallbackData> &&data) {
   auto msgBuilder = [](ChreFlatBufferBuilder &builder, void *cookie) {
     auto *cbData = static_cast<LoadNanoappCallbackData *>(cookie);
 
@@ -268,16 +239,13 @@ void finishLoadingNanoappCallback(uint16_t /*eventType*/, void *data) {
                                                 cbData->fragmentId);
   };
 
-  // Re-wrap the callback data struct, so it is destructed and freed, ensuring
-  // we don't leak the embedded UniquePtr<Nanoapp>
-  UniquePtr<LoadNanoappCallbackData> dataWrapped(
-      static_cast<LoadNanoappCallbackData *>(data));
   constexpr size_t kInitialBufferSize = 48;
   buildAndEnqueueMessage(PendingMessageType::LoadNanoappResponse,
-                         kInitialBufferSize, msgBuilder, data);
+                         kInitialBufferSize, msgBuilder, data.get());
 }
 
-void handleUnloadNanoappCallback(uint16_t /*eventType*/, void *data) {
+void handleUnloadNanoappCallback(SystemCallbackType /*type*/,
+                                 UniquePtr<UnloadNanoappCallbackData> &&data) {
   auto msgBuilder = [](ChreFlatBufferBuilder &builder, void *cookie) {
     auto *cbData = static_cast<UnloadNanoappCallbackData *>(cookie);
 
@@ -297,8 +265,7 @@ void handleUnloadNanoappCallback(uint16_t /*eventType*/, void *data) {
 
   constexpr size_t kInitialBufferSize = 52;
   buildAndEnqueueMessage(PendingMessageType::UnloadNanoappResponse,
-                         kInitialBufferSize, msgBuilder, data);
-  memoryFree(data);
+                         kInitialBufferSize, msgBuilder, data.get());
 }
 
 int generateMessageToHost(const MessageToHost *msgToHost, unsigned char *buffer,
@@ -514,6 +481,7 @@ UniquePtr<Nanoapp> handleLoadNanoappFile(uint16_t hostClientId,
  * @param transactionId the ID of the transaction
  * @param appId the ID of the app to load
  * @param appVersion the version of the app to load
+ * @param appFlags The flags provided by the app being loaded
  * @param targetApiVersion the API version this nanoapp is targeted for
  * @param buffer the nanoapp binary data. May be only part of the nanoapp's
  *     binary if it's being sent over multiple fragments
@@ -524,20 +492,23 @@ UniquePtr<Nanoapp> handleLoadNanoappFile(uint16_t hostClientId,
  * @return A valid pointer to a nanoapp that can be loaded into the system. A
  *     nullptr if the preparation process fails.
  */
-UniquePtr<Nanoapp> handleLoadNanoappData(
-    uint16_t hostClientId, uint32_t transactionId, uint64_t appId,
-    uint32_t appVersion, uint32_t targetApiVersion, const void *buffer,
-    size_t bufferLen, uint32_t fragmentId, size_t appBinaryLen) {
+UniquePtr<Nanoapp> handleLoadNanoappData(uint16_t hostClientId,
+                                         uint32_t transactionId, uint64_t appId,
+                                         uint32_t appVersion, uint32_t appFlags,
+                                         uint32_t targetApiVersion,
+                                         const void *buffer, size_t bufferLen,
+                                         uint32_t fragmentId,
+                                         size_t appBinaryLen) {
   static NanoappLoadManager sLoadManager;
 
   bool success = true;
   if (fragmentId == 0 || fragmentId == 1) {  // first fragment
     size_t totalAppBinaryLen = (fragmentId == 0) ? bufferLen : appBinaryLen;
     LOGD("Load nanoapp request for app ID 0x%016" PRIx64 " ver 0x%" PRIx32
-         " target API 0x%08" PRIx32 " size %zu (txnId %" PRIu32
-         " client %" PRIu16 ")",
-         appId, appVersion, targetApiVersion, totalAppBinaryLen, transactionId,
-         hostClientId);
+         " flags 0x%" PRIx32 " target API 0x%08" PRIx32
+         " size %zu (txnId %" PRIu32 " client %" PRIu16 ")",
+         appId, appVersion, appFlags, targetApiVersion, totalAppBinaryLen,
+         transactionId, hostClientId);
 
     if (sLoadManager.hasPendingLoadTransaction()) {
       FragmentedLoadInfo info = sLoadManager.getTransactionInfo();
@@ -546,8 +517,9 @@ UniquePtr<Nanoapp> handleLoadNanoappData(
       sLoadManager.markFailure();
     }
 
-    success = sLoadManager.prepareForLoad(hostClientId, transactionId, appId,
-                                          appVersion, totalAppBinaryLen);
+    success =
+        sLoadManager.prepareForLoad(hostClientId, transactionId, appId,
+                                    appVersion, appFlags, totalAppBinaryLen);
   }
   success &= sLoadManager.copyNanoappFragment(
       hostClientId, transactionId, (fragmentId == 0) ? 1 : fragmentId, buffer,
@@ -560,38 +532,6 @@ UniquePtr<Nanoapp> handleLoadNanoappData(
     nanoapp = sLoadManager.releaseNanoapp();
   }
   return nanoapp;
-}
-
-bool getSettingFromFbs(fbs::Setting setting, Setting *chreSetting) {
-  bool success = true;
-  switch (setting) {
-    case fbs::Setting::LOCATION:
-      *chreSetting = Setting::LOCATION;
-      break;
-    default:
-      LOGE("Unknown setting %" PRIu8, setting);
-      success = false;
-  }
-
-  return success;
-}
-
-bool getSettingStateFromFbs(fbs::SettingState state,
-                            SettingState *chreSettingState) {
-  bool success = true;
-  switch (state) {
-    case fbs::SettingState::DISABLED:
-      *chreSettingState = SettingState::DISABLED;
-      break;
-    case fbs::SettingState::ENABLED:
-      *chreSettingState = SettingState::ENABLED;
-      break;
-    default:
-      LOGE("Unknown state %" PRIu8, state);
-      success = false;
-  }
-
-  return success;
 }
 
 /**
@@ -834,28 +774,48 @@ void HostMessageHandlers::handleHubInfoRequest(uint16_t hostClientId) {
 }
 
 void HostMessageHandlers::handleNanoappListRequest(uint16_t hostClientId) {
+  auto callback = [](uint16_t /*type*/, void *data, void * /*extraData*/) {
+    uint16_t cbHostClientId = NestedDataPtr<uint16_t>(data);
+
+    NanoappListData cbData = {};
+    cbData.hostClientId = cbHostClientId;
+
+    size_t expectedNanoappCount =
+        EventLoopManagerSingleton::get()->getEventLoop().getNanoappCount();
+    if (!cbData.nanoappEntries.reserve(expectedNanoappCount)) {
+      LOG_OOM();
+    } else {
+      constexpr size_t kFixedOverhead = 48;
+      constexpr size_t kPerNanoappSize = 32;
+      size_t initialBufferSize =
+          (kFixedOverhead + expectedNanoappCount * kPerNanoappSize);
+
+      buildAndEnqueueMessage(PendingMessageType::NanoappListResponse,
+                             initialBufferSize, buildNanoappListResponse,
+                             &cbData);
+    }
+  };
+
   LOGD("Nanoapp list request from client ID %" PRIu16, hostClientId);
-  HostClientIdCallbackData cbData = {};
-  cbData.hostClientId = hostClientId;
   EventLoopManagerSingleton::get()->deferCallback(
-      SystemCallbackType::NanoappListResponse, cbData.ptr,
-      constructNanoappListCallback);
+      SystemCallbackType::NanoappListResponse,
+      NestedDataPtr<uint16_t>(hostClientId), callback);
 }
 
 void HostMessageHandlers::handleLoadNanoappRequest(
     uint16_t hostClientId, uint32_t transactionId, uint64_t appId,
-    uint32_t appVersion, uint32_t targetApiVersion, const void *buffer,
-    size_t bufferLen, const char *appFileName, uint32_t fragmentId,
-    size_t appBinaryLen) {
+    uint32_t appVersion, uint32_t appFlags, uint32_t targetApiVersion,
+    const void *buffer, size_t bufferLen, const char *appFileName,
+    uint32_t fragmentId, size_t appBinaryLen) {
   UniquePtr<Nanoapp> pendingNanoapp;
   if (appFileName != nullptr) {
     pendingNanoapp =
         handleLoadNanoappFile(hostClientId, transactionId, appId, appVersion,
                               targetApiVersion, appFileName);
   } else {
-    pendingNanoapp = handleLoadNanoappData(hostClientId, transactionId, appId,
-                                           appVersion, targetApiVersion, buffer,
-                                           bufferLen, fragmentId, appBinaryLen);
+    pendingNanoapp = handleLoadNanoappData(
+        hostClientId, transactionId, appId, appVersion, appFlags,
+        targetApiVersion, buffer, bufferLen, fragmentId, appBinaryLen);
   }
 
   if (!pendingNanoapp.isNull()) {
@@ -872,7 +832,7 @@ void HostMessageHandlers::handleLoadNanoappRequest(
       // Note that if this fails, we'll generate the error response in
       // the normal deferred callback
       EventLoopManagerSingleton::get()->deferCallback(
-          SystemCallbackType::FinishLoadingNanoapp, cbData.release(),
+          SystemCallbackType::FinishLoadingNanoapp, std::move(cbData),
           finishLoadingNanoappCallback);
     }
   }
@@ -884,7 +844,7 @@ void HostMessageHandlers::handleUnloadNanoappRequest(
   LOGD("Unload nanoapp request (txnID %" PRIu32 ") for appId 0x%016" PRIx64
        " system %d",
        transactionId, appId, allowSystemNanoappUnload);
-  auto *cbData = memoryAlloc<UnloadNanoappCallbackData>();
+  auto cbData = MakeUnique<UnloadNanoappCallbackData>();
   if (cbData == nullptr) {
     LOG_OOM();
   } else {
@@ -894,7 +854,7 @@ void HostMessageHandlers::handleUnloadNanoappRequest(
     cbData->allowSystemNanoappUnload = allowSystemNanoappUnload;
 
     EventLoopManagerSingleton::get()->deferCallback(
-        SystemCallbackType::HandleUnloadNanoapp, cbData,
+        SystemCallbackType::HandleUnloadNanoapp, std::move(cbData),
         handleUnloadNanoappCallback);
   }
 }
@@ -921,8 +881,8 @@ void HostMessageHandlers::handleSettingChangeMessage(fbs::Setting setting,
                                                      fbs::SettingState state) {
   Setting chreSetting;
   SettingState chreSettingState;
-  if (getSettingFromFbs(setting, &chreSetting) &&
-      getSettingStateFromFbs(state, &chreSettingState)) {
+  if (HostProtocolChre::getSettingFromFbs(setting, &chreSetting) &&
+      HostProtocolChre::getSettingStateFromFbs(state, &chreSettingState)) {
     postSettingChange(chreSetting, chreSettingState);
   }
 }

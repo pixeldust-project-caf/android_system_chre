@@ -33,14 +33,6 @@ SLPI_CFLAGS += -Iplatform/slpi/include
 # We use FlatBuffers in the SLPI platform layer
 SLPI_CFLAGS += $(FLATBUFFERS_CFLAGS)
 
-ifneq ($(CHRE_ENABLE_ACCEL_CAL), false)
-SLPI_CFLAGS += -DCHRE_ENABLE_ACCEL_CAL
-endif
-
-ifneq ($(CHRE_ENABLE_ASH_DEBUG_DUMP), false)
-SLPI_CFLAGS += -DCHRE_ENABLE_ASH_DEBUG_DUMP
-endif
-
 # SLPI/SEE-specific Compiler Flags #############################################
 
 # Include paths.
@@ -68,6 +60,26 @@ SLPI_SEE_CFLAGS += -DPB_FIELD_16BIT
 ifeq ($(IMPORT_CHRE_UTILS), true)
 SLPI_SEE_CFLAGS += -DIMPORT_CHRE_UTILS
 endif
+
+# Enable accel calibration and ASH debug dump by default unless overridden
+# explicitly by the environment.
+ifneq ($(CHRE_ENABLE_ACCEL_CAL), false)
+SLPI_SEE_CFLAGS += -DCHRE_ENABLE_ACCEL_CAL
+endif
+
+ifneq ($(CHRE_ENABLE_ASH_DEBUG_DUMP), false)
+SLPI_SEE_CFLAGS += -DCHRE_ENABLE_ASH_DEBUG_DUMP
+endif
+
+# SLPI/QSH-specific Compiler Flags #############################################
+
+# Include paths.
+SLPI_QSH_CFLAGS += -I$(SLPI_PREFIX)/qsh/qsh_nanoapp/inc
+SLPI_QSH_CFLAGS += -Iplatform/slpi/see/include
+
+# Define CHRE_SLPI_SEE for the few components that are still shared between QSH
+# and SEE.
+SLPI_QSH_CFLAGS += -DCHRE_SLPI_SEE
 
 # SLPI-specific Source Files ###################################################
 
@@ -154,6 +166,12 @@ ifneq ($(IMPORT_CHRE_UTILS), true)
 SLPI_SEE_SRCS += platform/slpi/see/island_vote_client.cc
 endif
 
+# SLPI/QSH-specific Source Files ###############################################
+
+SLPI_QSH_SRCS += platform/slpi/see/island_vote_client.cc
+SLPI_QSH_SRCS += platform/slpi/see/power_control_manager.cc
+SLPI_QSH_SRCS += platform/slpi/qsh/qsh_shim.cc
+
 # Simulator-specific Compiler Flags ############################################
 
 SIM_CFLAGS += -Iplatform/shared/include
@@ -231,10 +249,10 @@ GOOGLE_ARM64_ANDROID_CFLAGS += -Iplatform/android/include
 
 # Add in host sources to allow the executable to both be a socket server and
 # CHRE implementation.
-GOOGLE_ARM64_ANDROID_CFLAGS += -I$(ANDROID_BUILD_TOP)/system/core/base/include
+GOOGLE_ARM64_ANDROID_CFLAGS += -I$(ANDROID_BUILD_TOP)/system/libbase/include
 GOOGLE_ARM64_ANDROID_CFLAGS += -I$(ANDROID_BUILD_TOP)/system/core/libcutils/include
 GOOGLE_ARM64_ANDROID_CFLAGS += -I$(ANDROID_BUILD_TOP)/system/core/libutils/include
-GOOGLE_ARM64_ANDROID_CFLAGS += -I$(ANDROID_BUILD_TOP)/system/core/liblog/include
+GOOGLE_ARM64_ANDROID_CFLAGS += -I$(ANDROID_BUILD_TOP)/system/logging/liblog/include
 GOOGLE_ARM64_ANDROID_CFLAGS += -Ihost/common/include
 
 # Also add the linux sources to fall back to the default Linux implementation.
@@ -246,7 +264,7 @@ GOOGLE_ARM64_ANDROID_CFLAGS += -I$(FLATBUFFERS_PATH)/include
 # Android-specific Source Files ################################################
 
 ANDROID_CUTILS_TOP = $(ANDROID_BUILD_TOP)/system/core/libcutils
-ANDROID_LOG_TOP = $(ANDROID_BUILD_TOP)/system/core/liblog
+ANDROID_LOG_TOP = $(ANDROID_BUILD_TOP)/system/logging/liblog
 
 GOOGLE_ARM64_ANDROID_SRCS += $(ANDROID_CUTILS_TOP)/sockets_unix.cpp
 GOOGLE_ARM64_ANDROID_SRCS += $(ANDROID_CUTILS_TOP)/android_get_control_file.cpp
@@ -278,3 +296,5 @@ GOOGLETEST_CFLAGS += -Iplatform/slpi/include
 GOOGLETEST_COMMON_SRCS += platform/linux/assert.cc
 GOOGLETEST_COMMON_SRCS += platform/linux/audio_source.cc
 GOOGLETEST_COMMON_SRCS += platform/linux/platform_audio.cc
+GOOGLETEST_COMMON_SRCS += platform/tests/log_buffer_test.cc
+GOOGLETEST_COMMON_SRCS += platform/shared/log_buffer.cc

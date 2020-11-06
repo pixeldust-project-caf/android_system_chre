@@ -81,9 +81,10 @@ bool HostProtocolChre::decodeMessageFromHost(const void *message,
             getStringFromByteVector(request->app_binary_file_name());
         HostMessageHandlers::handleLoadNanoappRequest(
             hostClientId, request->transaction_id(), request->app_id(),
-            request->app_version(), request->target_api_version(),
-            appBinary->data(), appBinary->size(), appBinaryFilename,
-            request->fragment_id(), request->total_app_size());
+            request->app_version(), request->app_flags(),
+            request->target_api_version(), appBinary->data(), appBinary->size(),
+            appBinaryFilename, request->fragment_id(),
+            request->total_app_size());
         break;
       }
 
@@ -232,6 +233,45 @@ void HostProtocolChre::encodeLowPowerMicAccessRelease(
   auto request = fbs::CreateLowPowerMicAccessRelease(builder);
   finalize(builder, fbs::ChreMessage::LowPowerMicAccessRelease,
            request.Union());
+}
+
+bool HostProtocolChre::getSettingFromFbs(fbs::Setting setting,
+                                         Setting *chreSetting) {
+  bool success = true;
+  switch (setting) {
+    case fbs::Setting::LOCATION:
+      *chreSetting = Setting::LOCATION;
+      break;
+    case fbs::Setting::WIFI_AVAILABLE:
+      *chreSetting = Setting::WIFI_AVAILABLE;
+      break;
+    case fbs::Setting::AIRPLANE_MODE:
+      *chreSetting = Setting::AIRPLANE_MODE;
+      break;
+    default:
+      LOGE("Unknown setting %" PRIu8, setting);
+      success = false;
+  }
+
+  return success;
+}
+
+bool HostProtocolChre::getSettingStateFromFbs(fbs::SettingState state,
+                                              SettingState *chreSettingState) {
+  bool success = true;
+  switch (state) {
+    case fbs::SettingState::DISABLED:
+      *chreSettingState = SettingState::DISABLED;
+      break;
+    case fbs::SettingState::ENABLED:
+      *chreSettingState = SettingState::ENABLED;
+      break;
+    default:
+      LOGE("Unknown state %" PRIu8, state);
+      success = false;
+  }
+
+  return success;
 }
 
 }  // namespace chre

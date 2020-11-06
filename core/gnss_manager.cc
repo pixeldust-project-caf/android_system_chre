@@ -20,6 +20,7 @@
 #include "chre/core/settings.h"
 #include "chre/platform/assert.h"
 #include "chre/platform/fatal_error.h"
+#include "chre/util/nested_data_ptr.h"
 #include "chre/util/system/debug_dump.h"
 
 namespace chre {
@@ -93,8 +94,8 @@ void GnssManager::logStateToBuffer(DebugDumpWrapper &debugDump) const {
 }
 
 GnssSession::GnssSession(uint16_t reportEventType)
-    : mReportEventType(reportEventType) {
-  switch (mReportEventType) {
+    : kReportEventType(reportEventType) {
+  switch (kReportEventType) {
     case CHRE_EVENT_GNSS_LOCATION:
       mStartRequestType = CHRE_GNSS_REQUEST_TYPE_LOCATION_SESSION_START;
       mStopRequestType = CHRE_GNSS_REQUEST_TYPE_LOCATION_SESSION_STOP;
@@ -133,44 +134,38 @@ void GnssSession::handleStatusChange(bool enabled, uint8_t errorCode) {
   struct CallbackState {
     bool enabled;
     uint8_t errorCode;
-    GnssSession *session;
   };
 
-  auto *cbState = memoryAlloc<CallbackState>();
-  if (cbState == nullptr) {
-    LOG_OOM();
-  } else {
-    cbState->enabled = enabled;
-    cbState->errorCode = errorCode;
-    cbState->session = this;
+  auto callback = [](uint16_t /*type*/, void *data, void *extraData) {
+    auto *session = static_cast<GnssSession *>(data);
+    CallbackState cbState = NestedDataPtr<CallbackState>(extraData);
+    session->handleStatusChangeSync(cbState.enabled, cbState.errorCode);
+  };
 
-    auto callback = [](uint16_t /* eventType */, void *eventData) {
-      auto *state = static_cast<CallbackState *>(eventData);
-      state->session->handleStatusChangeSync(state->enabled, state->errorCode);
-      memoryFree(state);
-    };
-
-    EventLoopManagerSingleton::get()->deferCallback(
-        SystemCallbackType::GnssSessionStatusChange, cbState, callback);
-  }
+  CallbackState cbState = {};
+  cbState.enabled = enabled;
+  cbState.errorCode = errorCode;
+  EventLoopManagerSingleton::get()->deferCallback(
+      SystemCallbackType::GnssSessionStatusChange, /*data=*/this, callback,
+      NestedDataPtr<CallbackState>(cbState));
 }
 
 void GnssSession::handleReportEvent(void *event) {
-  auto callback = [](uint16_t type, void *eventData) {
+  auto callback = [](uint16_t type, void *data, void * /*extraData*/) {
     uint16_t reportEventType;
     if (!getReportEventType(static_cast<SystemCallbackType>(type),
                             &reportEventType) ||
         (getSettingState(Setting::LOCATION) == SettingState::DISABLED)) {
-      freeReportEventCallback(reportEventType, eventData);
+      freeReportEventCallback(reportEventType, data);
     } else {
       EventLoopManagerSingleton::get()->getEventLoop().postEventOrDie(
-          reportEventType, eventData, freeReportEventCallback);
+          reportEventType, data, freeReportEventCallback);
     }
   };
 
   SystemCallbackType type;
-  if (!getCallbackType(mReportEventType, &type)) {
-    freeReportEventCallback(mReportEventType, event);
+  if (!getCallbackType(kReportEventType, &type)) {
+    freeReportEventCallback(kReportEventType, event);
   } else {
     EventLoopManagerSingleton::get()->deferCallback(type, event, callback);
   }
@@ -389,14 +384,14 @@ bool GnssSession::updateRequests(bool enable, Milliseconds minInterval,
         if (!success) {
           LOG_OOM();
         } else {
-          nanoapp->registerForBroadcastEvent(mReportEventType);
+          nanoapp->registerForBroadcastEvent(kReportEventType);
         }
       }
     } else if (hasExistingRequest) {
       // The session was successfully disabled for a previously enabled
       // nanoapp. Remove it from the list of requests.
       mRequests.erase(requestIndex);
-      nanoapp->unregisterForBroadcastEvent(mReportEventType);
+      nanoapp->unregisterForBroadcastEvent(kReportEventType);
     }  // else disabling an inactive request, treat as success per CHRE API
   }
 
@@ -502,7 +497,7 @@ bool GnssSession::controlPlatform(bool enable, Milliseconds minInterval,
                                   Milliseconds /* minTimeToNext */) {
   bool success = false;
 
-  switch (mReportEventType) {
+  switch (kReportEventType) {
     case CHRE_EVENT_GNSS_LOCATION:
       // TODO: Provide support for min time to next report. It is currently sent
       // to the platform as zero.
@@ -520,7 +515,7 @@ bool GnssSession::controlPlatform(bool enable, Milliseconds minInterval,
       break;
 
     default:
-      CHRE_ASSERT_LOG(false, "Unhandled event type %" PRIu16, mReportEventType);
+      CHRE_ASSERT_LOG(false, "Unhandled event type %" PRIu16, kReportEventType);
   }
 
   if (success) {
