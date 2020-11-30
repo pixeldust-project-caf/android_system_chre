@@ -43,6 +43,8 @@ struct chreWifiScanCacheState {
   //! chreWifiScanCacheReleaseScanEvent().
   uint8_t numWifiEventsPendingRelease;
 
+  bool scanMonitoringEnabled;
+
   uint32_t scannedFreqList[CHRE_WIFI_FREQUENCY_LIST_MAX_LEN];
 };
 
@@ -53,6 +55,10 @@ static const struct chrePalSystemApi *gSystemApi = NULL;
 static const struct chrePalWifiCallbacks *gCallbacks = NULL;
 
 static struct chreWifiScanCacheState gWifiCacheState;
+
+//! true if scan monitoring is enabled via
+//! chreWifiScanCacheConfigureScanMonitor().
+static bool gScanMonitoringEnabled;
 
 static const uint64_t kOneMillisecondInNanoseconds = UINT64_C(1000000);
 
@@ -67,6 +73,52 @@ static bool areAllScanEventsReleased(void) {
   return gWifiCacheState.numWifiEventsPendingRelease == 0;
 }
 
+static bool isFrequencyListValid(const uint32_t *frequencyList,
+                                 uint16_t frequencyListLen) {
+  return (frequencyListLen == 0) || (frequencyList != NULL);
+}
+
+static bool paramsMatchScanCache(const struct chreWifiScanParams *params) {
+  uint64_t timeNs = gWifiCacheState.event.referenceTime;
+  // TODO(b/172663268): Add checks for other parameters
+  return (timeNs >= gSystemApi->getCurrentTime() - params->maxScanAgeMs);
+}
+
+static bool isWifiScanCacheBusy(bool logOnBusy) {
+  bool busy = true;
+  if (gWifiCacheState.started) {
+    if (logOnBusy) {
+      gSystemApi->log(CHRE_LOG_ERROR, "Scan cache already started");
+    }
+  } else if (!areAllScanEventsReleased()) {
+    if (logOnBusy) {
+      gSystemApi->log(CHRE_LOG_ERROR, "Scan cache events pending release");
+    }
+  } else {
+    busy = false;
+  }
+
+  return busy;
+}
+
+static void chreWifiScanCacheDispatchAll(void) {
+  uint8_t eventIndex = 0;
+  for (uint16_t i = 0; i < gWifiCacheState.event.resultTotal;
+       i += CHRE_PAL_WIFI_SCAN_CACHE_MAX_RESULT_COUNT) {
+    gWifiCacheState.event.resultCount =
+        MIN(CHRE_PAL_WIFI_SCAN_CACHE_MAX_RESULT_COUNT,
+            (uint8_t)(gWifiCacheState.event.resultTotal - i));
+    gWifiCacheState.event.eventIndex = eventIndex++;
+    gWifiCacheState.event.results = &gWifiCacheState.resultList[i];
+
+    // TODO: The current approach only works for situations where the
+    // event is released immediately. Add a way to handle this scenario
+    // (e.g. an array of chreWifiScanEvent's).
+    gWifiCacheState.numWifiEventsPendingRelease++;
+    gCallbacks->scanEventCallback(&gWifiCacheState.event);
+  }
+}
+
 /************************************************
  *  Public functions
  ***********************************************/
@@ -79,6 +131,7 @@ bool chreWifiScanCacheInit(const struct chrePalSystemApi *systemApi,
   gSystemApi = systemApi;
   gCallbacks = callbacks;
   memset(&gWifiCacheState, 0, sizeof(gWifiCacheState));
+  gScanMonitoringEnabled = false;
 
   return true;
 }
@@ -96,12 +149,12 @@ bool chreWifiScanCacheScanEventBegin(enum chreWifiScanType scanType,
                                      bool activeScanResult) {
   bool success = false;
   if (chreWifiScanCacheIsInitialized()) {
-    if (gWifiCacheState.started) {
-      gSystemApi->log(CHRE_LOG_ERROR, "Cannot start cache without ending");
-    } else if (!areAllScanEventsReleased()) {
-      gSystemApi->log(
-          CHRE_LOG_ERROR,
-          "Cannot start cache before releasing previous cache dispatch");
+    enum chreError error = CHRE_ERROR_NONE;
+    if (!isFrequencyListValid(scannedFreqList, scannedFreqListLength)) {
+      gSystemApi->log(CHRE_LOG_ERROR, "Invalid frequency argument");
+      error = CHRE_ERROR_INVALID_ARGUMENT;
+    } else if (isWifiScanCacheBusy(true /* logOnBusy */)) {
+      error = CHRE_ERROR_BUSY;
     } else {
       success = true;
       memset(&gWifiCacheState, 0, sizeof(gWifiCacheState));
@@ -117,25 +170,23 @@ bool chreWifiScanCacheScanEventBegin(enum chreWifiScanType scanType,
                scannedFreqListLength * sizeof(uint32_t));
       }
       gWifiCacheState.event.scannedFreqListLen = scannedFreqListLength;
-
       gWifiCacheState.event.radioChainPref = radioChainPref;
+
       gWifiCacheState.activeScanResult = activeScanResult;
       gWifiCacheState.started = true;
     }
-  }
 
-  if (activeScanResult && !success) {
-    gCallbacks->scanResponseCallback(false /* pending */, CHRE_ERROR_BUSY);
+    if (activeScanResult && !success) {
+      gCallbacks->scanResponseCallback(false /* pending */, error);
+    }
   }
 
   return success;
 }
 
 void chreWifiScanCacheScanEventAdd(const struct chreWifiScanResult *result) {
-  if (!areAllScanEventsReleased()) {
-    gSystemApi->log(
-        CHRE_LOG_ERROR,
-        "Cannot use cache before releasing previous cache dispatch");
+  if (!gWifiCacheState.started) {
+    gSystemApi->log(CHRE_LOG_ERROR, "Cannot add to cache before starting it");
   } else {
     if (gWifiCacheState.event.resultTotal >=
         CHRE_PAL_WIFI_SCAN_CACHE_CAPACITY) {
@@ -167,32 +218,19 @@ void chreWifiScanCacheScanEventEnd(enum chreError errorCode) {
           errorCode == CHRE_ERROR_NONE /* pending */, errorCode);
     }
 
-    if (errorCode == CHRE_ERROR_NONE) {
+    if (errorCode == CHRE_ERROR_NONE &&
+        (gWifiCacheState.activeScanResult || gScanMonitoringEnabled)) {
       gWifiCacheState.event.referenceTime = gSystemApi->getCurrentTime();
       gWifiCacheState.event.scannedFreqList = gWifiCacheState.scannedFreqList;
 
       uint32_t referenceTimeMs = (uint32_t)(
           gWifiCacheState.event.referenceTime / kOneMillisecondInNanoseconds);
-
-      uint8_t eventIndex = 0;
-      for (uint16_t i = 0; i < gWifiCacheState.event.resultTotal;
-           i += CHRE_PAL_WIFI_SCAN_CACHE_MAX_RESULT_COUNT) {
-        gWifiCacheState.event.resultCount =
-            MIN(CHRE_PAL_WIFI_SCAN_CACHE_MAX_RESULT_COUNT,
-                (uint8_t)(gWifiCacheState.event.resultTotal - i));
-        gWifiCacheState.event.eventIndex = eventIndex++;
-        gWifiCacheState.event.results = &gWifiCacheState.resultList[i];
-        for (uint8_t j = 0; j < gWifiCacheState.event.resultCount; j++) {
-          gWifiCacheState.resultList[i + j].ageMs =
-              referenceTimeMs - gWifiCacheState.resultList[i + j].ageMs;
-        }
-
-        // TODO: The current approach only works for situations where the
-        // event is released immediately. Add a way to handle this scenario
-        // (e.g. an array of chreWifiScanEvent's).
-        gWifiCacheState.numWifiEventsPendingRelease++;
-        gCallbacks->scanEventCallback(&gWifiCacheState.event);
+      for (uint16_t i = 0; i < gWifiCacheState.event.resultTotal; i++) {
+        gWifiCacheState.resultList[i].ageMs =
+            referenceTimeMs - gWifiCacheState.resultList[i].ageMs;
       }
+
+      chreWifiScanCacheDispatchAll();
     }
 
     gWifiCacheState.started = false;
@@ -206,9 +244,18 @@ bool chreWifiScanCacheDispatchFromCache(
     return false;
   }
 
-  UNUSED_VAR(params);
-  // TODO(b/172663268): Implement this
-  return false;
+  if (paramsMatchScanCache(params) &&
+      !isWifiScanCacheBusy(false /* logOnBusy */)) {
+    // TODO(b/172663268): Handle scenario where cache is working on delivering
+    // a scan event. Ideally the library will wait until it is complete to
+    // dispatch from the cache if it meets the criteria, rather than scheduling
+    // a fresh scan.
+    gCallbacks->scanResponseCallback(true /* pending */, CHRE_ERROR_NONE);
+    chreWifiScanCacheDispatchAll();
+    return true;
+  } else {
+    return false;
+  }
 }
 
 void chreWifiScanCacheReleaseScanEvent(struct chreWifiScanEvent *event) {
@@ -228,6 +275,5 @@ void chreWifiScanCacheConfigureScanMonitor(bool enable) {
     return;
   }
 
-  UNUSED_VAR(enable);
-  // TODO(b/172663268): Implement this
+  gScanMonitoringEnabled = enable;
 }
