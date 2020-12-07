@@ -66,16 +66,16 @@ static const struct ChppClient kWifiClientConfig = {
     .descriptor.version.minor = 0,
     .descriptor.version.patch = 0,
 
-    // Server response dispatch function pointer
+    // Service response dispatch function pointer
     .responseDispatchFunctionPtr = &chppDispatchWifiResponse,
 
-    // Server notification dispatch function pointer
+    // Service notification dispatch function pointer
     .notificationDispatchFunctionPtr = &chppDispatchWifiNotification,
 
-    // Server response dispatch function pointer
+    // Service response dispatch function pointer
     .initFunctionPtr = &chppWifiClientInit,
 
-    // Server notification dispatch function pointer
+    // Service notification dispatch function pointer
     .deinitFunctionPtr = &chppWifiClientDeinit,
 
     // Min length is the entire header
@@ -131,6 +131,8 @@ static void chppWifiGetCapabilitiesResult(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len);
 static void chppWifiConfigureScanMonitorResult(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len);
+static void chppWifiRequestScanResult(struct ChppWifiClientState *clientContext,
+                                      uint8_t *buf, size_t len);
 
 static void chppWifiScanEventNotification(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len);
@@ -142,7 +144,7 @@ static void chppWifiRangingEventNotification(
  ***********************************************/
 
 /**
- * Dispatches a server response from the transport layer that is determined to
+ * Dispatches a service response from the transport layer that is determined to
  * be for the WiFi client.
  *
  * This function is called from the app layer using its function pointer given
@@ -189,6 +191,12 @@ static enum ChppAppErrorCode chppDispatchWifiResponse(void *clientContext,
       break;
     }
 
+    case CHPP_WIFI_REQUEST_SCAN_ASYNC: {
+      chppClientTimestampResponse(&wifiClientContext->requestScan, rxHeader);
+      chppWifiRequestScanResult(wifiClientContext, buf, len);
+      break;
+    }
+
     default: {
       error = CHPP_APP_ERROR_INVALID_COMMAND;
       break;
@@ -199,7 +207,7 @@ static enum ChppAppErrorCode chppDispatchWifiResponse(void *clientContext,
 }
 
 /**
- * Dispatches a server notification from the transport layer that is determined
+ * Dispatches a service notification from the transport layer that is determined
  * to be for the WiFi client.
  *
  * This function is called from the app layer using its function pointer given
@@ -273,7 +281,7 @@ static void chppWifiClientDeinit(void *clientContext) {
 }
 
 /**
- * Handles the server response for the open client request.
+ * Handles the service response for the open client request.
  *
  * This function is called from chppDispatchWifiResponse().
  *
@@ -290,7 +298,7 @@ static void chppWifiOpenResult(struct ChppWifiClientState *clientContext,
 }
 
 /**
- * Handles the server response for the close client request.
+ * Handles the service response for the close client request.
  *
  * This function is called from chppDispatchWifiResponse().
  *
@@ -307,7 +315,7 @@ static void chppWifiCloseResult(struct ChppWifiClientState *clientContext,
 }
 
 /**
- * Handles the server response for the get capabilities client request.
+ * Handles the service response for the get capabilities client request.
  *
  * This function is called from chppDispatchWifiResponse().
  *
@@ -318,7 +326,9 @@ static void chppWifiCloseResult(struct ChppWifiClientState *clientContext,
 static void chppWifiGetCapabilitiesResult(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len) {
   if (len < sizeof(struct ChppWifiGetCapabilitiesResponse)) {
-    CHPP_LOGE("WiFi GetCapabilities result too short");
+    struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE("WiFi GetCapabilities request failed at service. error=%" PRIu8,
+              rxHeader->error);
 
   } else {
     struct ChppWifiGetCapabilitiesParameters *result =
@@ -344,13 +354,15 @@ static void chppWifiConfigureScanMonitorResult(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
 
-  if (len <
-      sizeof(struct ChppWifiConfigureScanMonitorAsyncResponseParameters)) {
-    CHPP_LOGE("WiFi ControlLocationSession result too short");
+  if (len < sizeof(struct ChppWifiConfigureScanMonitorAsyncResponse)) {
+    struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE(
+        "WiFi ControlLocationSession request failed at service. error=%" PRIu8,
+        rxHeader->error);
 
   } else {
     struct ChppWifiConfigureScanMonitorAsyncResponseParameters *result =
-        (struct ChppWifiConfigureScanMonitorAsyncResponseParameters *)buf;
+        &((struct ChppWifiConfigureScanMonitorAsyncResponse *)buf)->params;
 
     CHPP_LOGD(
         "chppWifiConfigureScanMonitorResult received enable=%s, "
@@ -363,7 +375,36 @@ static void chppWifiConfigureScanMonitorResult(
 }
 
 /**
- * Handles the WiFi scan event server notification.
+ * Handles the service response for the Request Scan Result client request.
+ *
+ * This function is called from chppDispatchWifiResponse().
+ *
+ * @param clientContext Maintains status for each client instance.
+ * @param buf Input data. Cannot be null.
+ * @param len Length of input data in bytes.
+ */
+static void chppWifiRequestScanResult(struct ChppWifiClientState *clientContext,
+                                      uint8_t *buf, size_t len) {
+  UNUSED_VAR(clientContext);
+
+  if (len < sizeof(struct ChppWifiRequestScanResponse)) {
+    struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE("WiFi RequestScanResult request failed at service. error=%" PRIu8,
+              rxHeader->error);
+
+  } else {
+    struct ChppWifiRequestScanResponseParameters *result =
+        &((struct ChppWifiRequestScanResponse *)buf)->params;
+
+    CHPP_LOGD("WiFi RequestScanResult request %ssuccessful at service",
+              result->pending ? "accepted and " : "FAILURE - accepted but un");
+
+    gCallbacks->scanResponseCallback(result->pending, result->errorCode);
+  }
+}
+
+/**
+ * Handles the WiFi scan event service notification.
  *
  * This function is called from chppDispatchWifiNotification().
  *
@@ -393,7 +434,7 @@ static void chppWifiScanEventNotification(
 }
 
 /**
- * Handles the WiFi ranging event server notification.
+ * Handles the WiFi ranging event service notification.
  *
  * This function is called from chppDispatchWifiNotification().
  *

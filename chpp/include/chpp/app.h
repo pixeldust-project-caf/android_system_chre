@@ -137,6 +137,8 @@ enum ChppAppErrorCode {
   CHPP_APP_ERROR_BLOCKED = 9,
   //! Invalid length
   CHPP_APP_ERROR_INVALID_LENGTH = 10,
+  //! CHPP Not Ready
+  CHPP_APP_ERROR_NOT_READY = 11,
   //! Unspecified failure
   CHPP_APP_ERROR_UNSPECIFIED = 255
 };
@@ -390,15 +392,15 @@ void chppAppDeinit(struct ChppAppState *appContext);
  */
 void chppAppDeinitTransient(struct ChppAppState *appContext);
 
-/*
+/**
  * Processes an Rx Datagram from the transport layer.
  *
  * @param context Maintains status for each app layer instance.
  * @param buf Input data. Cannot be null.
  * @param len Length of input data in bytes.
  */
-void chppProcessRxDatagram(struct ChppAppState *context, uint8_t *buf,
-                           size_t len);
+void chppAppProcessRxDatagram(struct ChppAppState *context, uint8_t *buf,
+                              size_t len);
 
 /**
  * Convert UUID to a human-readable, null-terminated string.
