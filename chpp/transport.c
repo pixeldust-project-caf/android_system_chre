@@ -29,6 +29,7 @@
 #include "chpp/log.h"
 #include "chpp/macros.h"
 #include "chpp/memory.h"
+#include "chpp/time.h"
 
 /************************************************
  *  Prototypes
@@ -53,7 +54,8 @@ static void chppProcessTransportLoopbackRequest(
 static void chppProcessTransportLoopbackResponse(
     struct ChppTransportState *context);
 #endif
-static void chppProcessReset(struct ChppTransportState *context);
+static void chppReset(struct ChppTransportState *context,
+                      enum ChppTransportPacketAttributes resetType);
 static void chppProcessResetAck(struct ChppTransportState *context);
 static void chppProcessRxPayload(struct ChppTransportState *context);
 static void chppClearRxDatagram(struct ChppTransportState *context);
@@ -66,7 +68,6 @@ static void chppEnqueueTxPacket(struct ChppTransportState *context,
                                 uint8_t packetCode);
 static size_t chppAddPreamble(uint8_t *buf);
 static void chppAddFooter(struct PendingTxPacket *packet);
-bool chppDequeueTxDatagram(struct ChppTransportState *context);
 static void chppTransportDoWork(struct ChppTransportState *context);
 static void chppAppendToPendingTxPacket(struct PendingTxPacket *packet,
                                         const uint8_t *buf, size_t len);
@@ -74,8 +75,9 @@ static bool chppEnqueueTxDatagram(struct ChppTransportState *context,
                                   uint8_t packetCode, void *buf, size_t len);
 
 static void chppResetTransportContext(struct ChppTransportState *context);
-static void chppReset(struct ChppTransportState *transportContext,
-                      struct ChppAppState *appContext);
+
+// Exposed for testing
+size_t chppDequeueTxDatagram(struct ChppTransportState *context);
 
 /************************************************
  *  Private Functions
@@ -288,13 +290,8 @@ static size_t chppConsumeFooter(struct ChppTransportState *context,
     } else if (CHPP_TRANSPORT_GET_ATTR(context->rxHeader.packetCode) ==
                CHPP_TRANSPORT_ATTR_RESET) {
       CHPP_LOGD("RX RESET packet. seq=%" PRIu8, context->rxHeader.seq);
-      chppProcessReset(context);
-
       chppMutexUnlock(&context->mutex);
-      chppTransportSendReset(context, CHPP_TRANSPORT_ATTR_RESET_ACK);
-#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
-      chppInitiateDiscovery(context->appContext);
-#endif
+      chppReset(context, CHPP_TRANSPORT_ATTR_RESET_ACK);
       chppMutexLock(&context->mutex);
 
     } else if (CHPP_TRANSPORT_GET_ATTR(context->rxHeader.packetCode) ==
@@ -377,6 +374,11 @@ static void chppRxAbortPacket(struct ChppTransportState *context) {
   }
 }
 
+/**
+ * Processes a request that is determined to be for a transport-layer loopback.
+ *
+ * @param context Maintains status for each transport layer instance.
+ */
 #ifdef CHPP_SERVICE_ENABLED_TRANSPORT_LOOPBACK
 static void chppProcessTransportLoopbackRequest(
     struct ChppTransportState *context) {
@@ -423,6 +425,11 @@ static void chppProcessTransportLoopbackRequest(
 }
 #endif
 
+/**
+ * Processes a response that is determined to be for a transport-layer loopback.
+ *
+ * @param context Maintains status for each transport layer instance.
+ */
 #ifdef CHPP_CLIENT_ENABLED_TRANSPORT_LOOPBACK
 static void chppProcessTransportLoopbackResponse(
     struct ChppTransportState *context) {
@@ -459,23 +466,23 @@ static void chppProcessTransportLoopbackResponse(
 }
 #endif
 
-static void chppProcessReset(struct ChppTransportState *context) {
-  // TODO: Configure transport layer based on (optional?) received config before
-  // datagram is wiped
-
-  chppReset(context, context->appContext);
-
-  // context->rxHeader is not wiped in reset
-  context->rxStatus.receivedPacketCode = context->rxHeader.packetCode;
-  context->rxStatus.expectedSeq = context->rxHeader.seq + 1;
-}
-
-// Method to invoke when the reset sequence is completed.
+/**
+ * Method to invoke when the reset sequence is completed.
+ *
+ * @param context Maintains status for each transport layer instance.
+ */
 static void chppSetResetComplete(struct ChppTransportState *context) {
   context->resetState = CHPP_RESET_STATE_NONE;
+  context->resetCount = 0;
   chppConditionVariableSignal(&context->resetCondVar);
 }
 
+/**
+ * An incoming reset-ack packet indicates that a reset is complete at the other
+ * end of the CHPP link.
+ *
+ * @param context Maintains status for each transport layer instance.
+ */
 static void chppProcessResetAck(struct ChppTransportState *context) {
   chppSetResetComplete(context);
   context->rxStatus.receivedPacketCode = context->rxHeader.packetCode;
@@ -639,6 +646,7 @@ static void chppRegisterRxAck(struct ChppTransportState *context) {
               .length);
 
       context->rxStatus.receivedAckSeq = rxAckSeq;
+      context->txStatus.retxCount = 0;
 
       // Process and if necessary pop from Tx datagram queue
       context->txStatus.ackedLocInDatagram += CHPP_TRANSPORT_TX_MTU_BYTES;
@@ -649,8 +657,14 @@ static void chppRegisterRxAck(struct ChppTransportState *context) {
 
         context->txStatus.ackedLocInDatagram = 0;
         context->txStatus.sentLocInDatagram = 0;
-        // Note: For a future ACK window >1, we should update which datagram too
-        chppDequeueTxDatagram(context);
+
+        // Note: For a future ACK window >1, we need to update the queue
+        // position of the datagram being sent as well (relative to the
+        // front-of-queue). e.g. context->txStatus.datagramBeingSent--;
+
+        if (chppDequeueTxDatagram(context) == 0) {
+          context->txStatus.hasPacketsToSend = false;
+        }
       }
     }
   }  // else {nothing was ACKed}
@@ -729,15 +743,12 @@ static void chppAddFooter(struct PendingTxPacket *packet) {
 
 /**
  * Dequeues the datagram at the front of the datagram tx queue, if any, and
- * frees the payload. Returns false if the queue is empty.
+ * frees the payload. Returns the number of remaining datagrams in the queue.
  *
  * @param context Maintains status for each transport layer instance.
- * @return True indicates success. False indicates failure, i.e. the queue was
- * empty.
+ * @return Number of remaining datagrams in queue.
  */
-bool chppDequeueTxDatagram(struct ChppTransportState *context) {
-  bool success = false;
-
+size_t chppDequeueTxDatagram(struct ChppTransportState *context) {
   if (context->txDatagramQueue.pending == 0) {
     CHPP_LOGE("Can not dequeue datagram because queue is empty");
 
@@ -759,15 +770,9 @@ bool chppDequeueTxDatagram(struct ChppTransportState *context) {
     context->txDatagramQueue.pending--;
     context->txDatagramQueue.front++;
     context->txDatagramQueue.front %= CHPP_TX_DATAGRAM_QUEUE_LEN;
-
-    // Note: For a future ACK window >1, we need to update the queue position of
-    // the datagram being sent as well (relative to the front-of-queue). i.e.
-    // context->txStatus.datagramBeingSent--;
-
-    success = true;
   }
 
-  return success;
+  return context->txDatagramQueue.pending;
 }
 
 /**
@@ -833,6 +838,16 @@ static void chppTransportDoWork(struct ChppTransportState *context) {
 
       txHeader->seq = context->rxStatus.receivedAckSeq;
       context->txStatus.sentSeq = txHeader->seq;
+      context->txStatus.retxCount++;
+
+      if (context->txStatus.retxCount > CHPP_TRANSPORT_MAX_RETX) {
+        CHPP_LOGE("ReTx packet failed after %d tries. Attempting to reset CHPP",
+                  CHPP_TRANSPORT_MAX_RETX);
+
+        chppMutexUnlock(&context->mutex);
+        chppReset(context, CHPP_TRANSPORT_ATTR_RESET);
+        chppMutexLock(&context->mutex);
+      }
 
       size_t remainingBytes =
           context->txDatagramQueue.datagram[context->txDatagramQueue.front]
@@ -867,13 +882,12 @@ static void chppTransportDoWork(struct ChppTransportState *context) {
 
     }  // else {no payload}
 
-    // Populate checksum
     chppAddFooter(&context->pendingTxPacket);
 
-    // Note: For a future ACK window >1, this needs to be updated
-    context->txStatus.hasPacketsToSend = false;
+    if (context->txDatagramQueue.pending == 0) {
+      context->txStatus.hasPacketsToSend = false;
+    }
 
-    // We are done with context. Unlock mutex ASAP.
     chppMutexUnlock(&context->mutex);
 
     // Send out the packet
@@ -1000,6 +1014,8 @@ static bool chppEnqueueTxDatagram(struct ChppTransportState *context,
 
 /**
  * Resets the transport state, maintaining the link layer parameters.
+ *
+ * @param context Maintains status for each transport layer instance.
  */
 static void chppResetTransportContext(struct ChppTransportState *context) {
   memset(&context->rxStatus, 0, sizeof(struct ChppRxStatus));
@@ -1022,15 +1038,17 @@ static void chppResetTransportContext(struct ChppTransportState *context) {
  * transportContext.linkParams.
  *
  * @param transportContext Maintains status for each transport layer instance.
- * @param appContext The app layer status struct associated with this transport
- * layer instance.
+ * @param resetType Type of reset to send after resetting CHPP (reset vs.
+ * reset-ack), as defined in the ChppTransportPacketAttributes struct.
  */
 static void chppReset(struct ChppTransportState *transportContext,
-                      struct ChppAppState *appContext) {
-  transportContext->resetState = CHPP_RESET_STATE_RESETTING;
+                      enum ChppTransportPacketAttributes resetType) {
+  // TODO: Configure transport layer based on (optional?) received config before
+  // datagram is wiped
 
-  // Deinitialize app layer (deregistering services and clients)
-  chppAppDeinitTransient(appContext);
+  chppMutexLock(&transportContext->mutex);
+  struct ChppAppState *appContext = transportContext->appContext;
+  transportContext->resetState = CHPP_RESET_STATE_RESETTING;
 
   // Reset asynchronous link layer if busy
   if (transportContext->txStatus.linkBusy == true) {
@@ -1053,12 +1071,23 @@ static void chppReset(struct ChppTransportState *transportContext,
     }
   }
 
-  // Reset Transport Layer
+  // Reset Transport Layer but restore Rx sequence number and packet code
+  // (context->rxHeader is not wiped in reset)
   chppResetTransportContext(transportContext);
+  transportContext->rxStatus.receivedPacketCode =
+      transportContext->rxHeader.packetCode;
+  transportContext->rxStatus.expectedSeq = transportContext->rxHeader.seq + 1;
 
   // Initialize app layer
-  chppAppInitWithClientServiceSet(appContext, transportContext,
-                                  appContext->clientServiceSet);
+  chppAppInitTransient(appContext, transportContext,
+                       appContext->clientServiceSet);
+
+  // Send reset-ACK
+  chppMutexUnlock(&transportContext->mutex);
+  chppTransportSendReset(transportContext, resetType);
+
+  // Inform the App Layer
+  chppAppProcessRxReset(appContext);
 }
 
 /************************************************
@@ -1232,13 +1261,38 @@ void chppEnqueueTxErrorDatagram(struct ChppTransportState *context,
                                    CHPP_TRANSPORT_GET_ERROR(errorCode)));
 }
 
+uint64_t chppTransportGetTimeUntilNextDoWorkNs(
+    struct ChppTransportState *context) {
+  uint64_t time = chppGetCurrentTimeNs();
+
+  if (!context->txStatus.hasPacketsToSend &&
+      (context->resetState != CHPP_RESET_STATE_RESETTING)) {
+    return CHPP_TRANSPORT_TIMEOUT_INFINITE;
+
+  } else if (time >
+             CHPP_TRANSPORT_TX_TIMEOUT_NS + context->txStatus.lastTxTimeNs) {
+    return CHPP_TRANSPORT_TIMEOUT_IMMEDIATE;
+
+  } else {
+    return CHPP_TRANSPORT_TX_TIMEOUT_NS + context->txStatus.lastTxTimeNs - time;
+  }
+}
+
 void chppWorkThreadStart(struct ChppTransportState *context) {
   chppTransportSendReset(context, CHPP_TRANSPORT_ATTR_RESET);
   CHPP_LOGI("CHPP Work Thread started");
 
   uint32_t signals;
   do {
-    signals = chppNotifierWait(&context->notifier);
+    uint64_t timeout = chppTransportGetTimeUntilNextDoWorkNs(context);
+    if (timeout == CHPP_TRANSPORT_TIMEOUT_IMMEDIATE) {
+      signals = chppNotifierGetSignal(&context->notifier);
+    } else if (timeout == CHPP_TRANSPORT_TIMEOUT_INFINITE) {
+      signals = chppNotifierWait(&context->notifier);
+    } else {
+      signals = chppNotifierTimedWait(&context->notifier, timeout);
+    }
+
   } while (chppWorkThreadHandleSignal(context, signals));
 }
 
@@ -1252,6 +1306,29 @@ bool chppWorkThreadHandleSignal(struct ChppTransportState *context,
   if (signals & CHPP_TRANSPORT_SIGNAL_EVENT) {
     chppTransportDoWork(context);
   }
+
+  if (signals == 0) {
+    // Triggered by timeout
+
+    if (chppGetCurrentTimeNs() - context->txStatus.lastTxTimeNs >=
+        CHPP_TRANSPORT_TX_TIMEOUT_NS) {
+      CHPP_LOGE("Timeout waiting for ACK, i.e. implicit NACK");
+      chppTransportDoWork(context);
+    }
+
+    if ((context->resetState == CHPP_RESET_STATE_RESETTING) &&
+        (chppGetCurrentTimeNs() - context->resetTimeNs >=
+         CHPP_TRANSPORT_RESET_TIMEOUT_NS)) {
+      if (context->resetCount < CHPP_TRANSPORT_MAX_RESET) {
+        CHPP_LOGE("Timeout while waiting for RESET-ACK. Retrying a reset");
+        chppReset(context, CHPP_TRANSPORT_ATTR_RESET);
+      } else {
+        CHPP_LOGE("Timeout while waiting for RESET-ACK. Giving up permanently");
+        context->resetState = CHPP_RESET_STATE_PERMANENT_FAILURE;
+      }
+    }
+  }
+
   if (signals & CHPP_TRANSPORT_SIGNAL_PLATFORM_MASK) {
     chppPlatformLinkDoWork(&context->linkParams,
                            signals & CHPP_TRANSPORT_SIGNAL_PLATFORM_MASK);
@@ -1276,10 +1353,13 @@ void chppLinkSendDoneCb(struct ChppPlatformLinkParameters *params,
       container_of(params, struct ChppTransportState, linkParams);
 
   chppMutexLock(&context->mutex);
+
+  context->txStatus.lastTxTimeNs = chppGetCurrentTimeNs();
   context->txStatus.linkBusy = false;
-  if (context->txStatus.hasPacketsToSend) {
-    chppNotifierSignal(&context->notifier, CHPP_TRANSPORT_SIGNAL_EVENT);
-  }
+
+  // No need to free anything as pendingTxPacket.payload is static. Likewise, we
+  // keep pendingTxPacket.length to assist testing.
+
   chppMutexUnlock(&context->mutex);
 }
 
@@ -1404,6 +1484,8 @@ void chppTransportSendReset(struct ChppTransportState *context,
   if (resetType == CHPP_TRANSPORT_ATTR_RESET_ACK) {
     chppSetResetComplete(context);
   }
+
+  context->resetTimeNs = chppGetCurrentTimeNs();
 
   chppEnqueueTxDatagram(
       context,

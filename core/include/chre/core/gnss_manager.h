@@ -445,6 +445,34 @@ class GnssManager : public NonCopyable {
 
   //! The instance of measurement session.
   GnssSession mMeasurementSession;
+
+  //! The list of instance ID of nanoapps that has a passive location listener
+  //! request.
+  DynamicVector<uint32_t> mPassiveLocationListenerNanoapps;
+
+  //! true if the passive location listener is enabled at the platform.
+  bool mPlatformPassiveLocationListenerEnabled;
+
+  /**
+   * @param nanoappInstanceId The instance ID of the nanoapp to check.
+   * @param index If non-null and this function returns true, stores the index
+   * of mPassiveLocationListenerNanoapps where the instance ID is stored.
+   *
+   * @return true if the nanoapp currently has a passive location listener
+   * request.
+   */
+  bool nanoappHasPassiveLocationListener(uint32_t nanoappInstanceId,
+                                         size_t *index = nullptr);
+
+  /**
+   * Helper function to invoke configurePassiveLocationListener at the platform
+   * and handle the result.
+   *
+   * @param enable true to enable the configuration.
+   *
+   * @return true if success.
+   */
+  bool platformConfigurePassiveLocationListener(bool enable);
 };
 
 }  // namespace chre
