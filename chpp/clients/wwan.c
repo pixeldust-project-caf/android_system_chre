@@ -23,6 +23,9 @@
 
 #include "chpp/app.h"
 #include "chpp/clients/discovery.h"
+#ifdef CHPP_CLIENT_ENABLED_TIMESYNC
+#include "chpp/clients/timesync.h"
+#endif
 #include "chpp/common/standard_uuids.h"
 #include "chpp/common/wwan.h"
 #include "chpp/common/wwan_types.h"
@@ -35,6 +38,10 @@
 #define CHPP_WWAN_DISCOVERY_TIMEOUT_MS CHPP_DISCOVERY_DEFAULT_TIMEOUT_MS
 #endif
 
+#ifndef CHPP_WWAN_MAX_TIMESYNC_AGE_NS
+#define CHPP_WWAN_MAX_TIMESYNC_AGE_NS CHPP_TIMESYNC_DEFAULT_MAX_AGE_NS
+#endif
+
 /************************************************
  *  Prototypes
  ***********************************************/
@@ -44,6 +51,7 @@ static enum ChppAppErrorCode chppDispatchWwanResponse(void *clientContext,
 static bool chppWwanClientInit(void *clientContext, uint8_t handle,
                                struct ChppVersion serviceVersion);
 static void chppWwanClientDeinit(void *clientContext);
+static void chppWwanClientNotifyReset(void *clientContext);
 
 /************************************************
  *  Private Definitions
@@ -61,7 +69,7 @@ static const struct ChppClient kWwanClientConfig = {
     .descriptor.version.patch = 0,
 
     // Notifies client if CHPP is reset
-    .resetNotifierFunctionPtr = NULL,
+    .resetNotifierFunctionPtr = &chppWwanClientNotifyReset,
 
     // Service response dispatch function pointer
     .responseDispatchFunctionPtr = &chppDispatchWwanResponse,
@@ -93,8 +101,6 @@ struct ChppWwanClientState {
   struct ChppRequestResponseState getCellInfoAsync;  // Get CellInfo Async state
 
   uint32_t capabilities;  // Cached GetCapabilities result
-
-  bool opened;  // WWAN has been successfully opened
 };
 
 // Note: This global definition of gWwanClientContext supports only one
@@ -115,8 +121,6 @@ static bool chppWwanClientGetCellInfoAsync(void);
 static void chppWwanClientReleaseCellInfoResult(
     struct chreWwanCellInfoResult *result);
 
-static void chppWwanOpenResult(struct ChppWwanClientState *clientContext,
-                               uint8_t *buf, size_t len);
 static void chppWwanCloseResult(struct ChppWwanClientState *clientContext,
                                 uint8_t *buf, size_t len);
 static void chppWwanGetCapabilitiesResult(
@@ -152,7 +156,7 @@ static enum ChppAppErrorCode chppDispatchWwanResponse(void *clientContext,
   switch (rxHeader->command) {
     case CHPP_WWAN_OPEN: {
       chppClientTimestampResponse(&wwanClientContext->open, rxHeader);
-      chppWwanOpenResult(wwanClientContext, buf, len);
+      chppClientProcessOpenResponse(&wwanClientContext->client, buf, len);
       break;
     }
 
@@ -219,22 +223,21 @@ static void chppWwanClientDeinit(void *clientContext) {
 }
 
 /**
- * Handles the service response for the open client request.
- *
- * This function is called from chppDispatchWwanResponse().
+ * Notifies the client of an incoming reset.
  *
  * @param clientContext Maintains status for each client instance.
- * @param buf Input data. Cannot be null.
- * @param len Length of input data in bytes.
  */
-static void chppWwanOpenResult(struct ChppWwanClientState *clientContext,
-                               uint8_t *buf, size_t len) {
-  UNUSED_VAR(len);
+static void chppWwanClientNotifyReset(void *clientContext) {
+  struct ChppWwanClientState *wwanClientContext =
+      (struct ChppWwanClientState *)clientContext;
 
-  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
-  clientContext->opened = (rxHeader->error == CHPP_APP_ERROR_NONE);
-  if (!clientContext->opened) {
-    CHPP_LOGE("WWAN open failed at service");
+  if (wwanClientContext->client.openState != CHPP_OPEN_STATE_OPENED) {
+    CHPP_LOGW("WWAN client reset but client wasn't open");
+  } else {
+    CHPP_LOGI("WWAN client reopening");
+    chppClientSendOpenRequest(&gWwanClientContext.client,
+                              &gWwanClientContext.open, CHPP_WWAN_OPEN,
+                              /*reopen=*/true);
   }
 }
 
@@ -275,8 +278,15 @@ static void chppWwanGetCapabilitiesResult(
     struct ChppWwanGetCapabilitiesParameters *result =
         &((struct ChppWwanGetCapabilitiesResponse *)buf)->params;
 
-    CHPP_LOGD("chppWwanGetCapabilitiesResult received capabilities=0x%" PRIx32,
+    CHPP_LOGI("chppWwanGetCapabilitiesResult received capabilities=0x%" PRIx32,
               result->capabilities);
+#ifdef CHPP_WWAN_DEFAULT_CAPABILITIES
+    if (result->capabilities != CHPP_WWAN_DEFAULT_CAPABILITIES) {
+      CHPP_LOGE("Unexpected capability: expected 0x%" PRIx32,
+                CHPP_WWAN_DEFAULT_CAPABILITIES);
+      CHPP_PROD_ASSERT(false);
+    }
+#endif
 
     clientContext->capabilities = result->capabilities;
   }
@@ -295,7 +305,7 @@ static void chppWwanGetCapabilitiesResult(
 static void chppWwanGetCellInfoAsyncResult(
     struct ChppWwanClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
-  CHPP_LOGD("chppWwanGetCellInfoAsyncResult received data len=%" PRIuSIZE, len);
+  CHPP_LOGI("chppWwanGetCellInfoAsyncResult received data len=%" PRIuSIZE, len);
 
   buf += sizeof(struct ChppAppHeader);
   len -= sizeof(struct ChppAppHeader);
@@ -309,6 +319,16 @@ static void chppWwanGetCellInfoAsyncResult(
         "len=%" PRIuSIZE,
         len);
   } else {
+#ifdef CHPP_CLIENT_ENABLED_TIMESYNC
+    int64_t offset = chppTimesyncGetOffset(gWwanClientContext.client.appContext,
+                                           CHPP_WWAN_MAX_TIMESYNC_AGE_NS);
+    for (uint8_t i = 0; i < chre->cellInfoCount; i++) {
+      uint64_t *timeStamp =
+          (uint64_t *)(CHPP_CONST_CAST_POINTER(&chre->cells[i].timeStamp));
+      *timeStamp -= (uint64_t)offset;
+    }
+#endif
+
     gCallbacks->cellInfoResultCallback(chre);
   }
 }
@@ -327,33 +347,25 @@ static bool chppWwanClientOpen(const struct chrePalSystemApi *systemApi,
   CHPP_DEBUG_ASSERT(systemApi != NULL);
   CHPP_DEBUG_ASSERT(callbacks != NULL);
 
-  gWwanClientContext.opened = false;
+  bool result = false;
   gSystemApi = systemApi;
   gCallbacks = callbacks;
 
-  // Local
-  gWwanClientContext.capabilities = CHRE_WWAN_CAPABILITIES_NONE;
+  CHPP_LOGI("WWAN client opening");
 
   // Wait for discovery to complete for "open" call to succeed
-  if (!chppWaitForDiscoveryComplete(gWwanClientContext.client.appContext,
-                                    CHPP_WWAN_DISCOVERY_TIMEOUT_MS)) {
-    CHPP_LOGE("Timed out waiting to discover CHPP WWAN service");
-  } else {
-    // Remote
-    struct ChppAppHeader *request = chppAllocClientRequestCommand(
-        &gWwanClientContext.client, CHPP_WWAN_OPEN);
-
-    if (request == NULL) {
-      CHPP_LOG_OOM();
-    } else {
-      chppSendTimestampedRequestAndWait(&gWwanClientContext.client,
-                                        &gWwanClientContext.open, request,
-                                        sizeof(*request));
-      // gWwanClientContext.opened is now set
-    }
+  if (chppWaitForDiscoveryComplete(gWwanClientContext.client.appContext,
+                                   CHPP_WWAN_DISCOVERY_TIMEOUT_MS)) {
+    result = chppClientSendOpenRequest(&gWwanClientContext.client,
+                                       &gWwanClientContext.open, CHPP_WWAN_OPEN,
+                                       /*reopen=*/false);
   }
 
-  return gWwanClientContext.opened;
+#ifdef CHPP_WWAN_CLIENT_OPEN_ALWAYS_SUCCESS
+  result = true;
+#endif
+
+  return result;
 }
 
 /**
@@ -369,7 +381,7 @@ static void chppWwanClientClose(void) {
   } else if (chppSendTimestampedRequestAndWait(&gWwanClientContext.client,
                                                &gWwanClientContext.close,
                                                request, sizeof(*request))) {
-    gWwanClientContext.opened = false;
+    gWwanClientContext.client.openState = CHPP_OPEN_STATE_CLOSED;
     gWwanClientContext.capabilities = CHRE_WWAN_CAPABILITIES_NONE;
   }
 }
@@ -381,7 +393,11 @@ static void chppWwanClientClose(void) {
  * @return Capabilities flags.
  */
 static uint32_t chppWwanClientGetCapabilities(void) {
+#ifdef CHPP_WWAN_DEFAULT_CAPABILITIES
+  uint32_t capabilities = CHPP_WWAN_DEFAULT_CAPABILITIES;
+#else
   uint32_t capabilities = CHRE_WWAN_CAPABILITIES_NONE;
+#endif
 
   if (gWwanClientContext.capabilities != CHRE_WWAN_CAPABILITIES_NONE) {
     // Result already cached

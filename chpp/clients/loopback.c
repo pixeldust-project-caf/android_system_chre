@@ -65,6 +65,7 @@ void chppLoopbackClientInit(struct ChppAppState *context) {
   context->loopbackClientContext->client.appContext = context;
   chppClientInit(&context->loopbackClientContext->client, CHPP_HANDLE_LOOPBACK);
   context->loopbackClientContext->testResult.error = CHPP_APP_ERROR_NONE;
+  context->loopbackClientContext->client.openState = CHPP_OPEN_STATE_OPENED;
 }
 
 void chppLoopbackClientDeinit(struct ChppAppState *context) {
@@ -121,7 +122,7 @@ bool chppDispatchLoopbackServiceResponse(struct ChppAppState *context,
     }
   }
 
-  CHPP_LOGD(
+  CHPP_LOGI(
       "Loopback client processed service response. Test %s. response "
       "len=%" PRIuSIZE ", request len=%" PRIuSIZE ", error code=0x%" PRIx16
       ", first error=%" PRIuSIZE ", total errors=%" PRIuSIZE,
@@ -147,7 +148,7 @@ bool chppDispatchLoopbackServiceResponse(struct ChppAppState *context,
 struct ChppLoopbackTestResult chppRunLoopbackTest(struct ChppAppState *context,
                                                   const uint8_t *buf,
                                                   size_t len) {
-  CHPP_LOGD("Running loopback test with payload len=%" PRIuSIZE
+  CHPP_LOGI("Running loopback test with payload len=%" PRIuSIZE
             ", request len=%" PRIuSIZE,
             len, len + CHPP_LOOPBACK_HEADER_LEN);
 

@@ -25,6 +25,9 @@
 #include "chpp/app.h"
 #include "chpp/clients.h"
 #include "chpp/clients/discovery.h"
+#ifdef CHPP_CLIENT_ENABLED_TIMESYNC
+#include "chpp/clients/timesync.h"
+#endif
 #include "chpp/common/standard_uuids.h"
 #include "chpp/common/wifi.h"
 #include "chpp/common/wifi_types.h"
@@ -36,6 +39,10 @@
 
 #ifndef CHPP_WIFI_DISCOVERY_TIMEOUT_MS
 #define CHPP_WIFI_DISCOVERY_TIMEOUT_MS CHPP_DISCOVERY_DEFAULT_TIMEOUT_MS
+#endif
+
+#ifndef CHPP_WIFI_MAX_TIMESYNC_AGE_NS
+#define CHPP_WIFI_MAX_TIMESYNC_AGE_NS CHPP_TIMESYNC_DEFAULT_MAX_AGE_NS
 #endif
 
 /************************************************
@@ -50,6 +57,7 @@ static enum ChppAppErrorCode chppDispatchWifiNotification(void *clientContext,
 static bool chppWifiClientInit(void *clientContext, uint8_t handle,
                                struct ChppVersion serviceVersion);
 static void chppWifiClientDeinit(void *clientContext);
+static void chppWifiClientNotifyReset(void *clientContext);
 
 /************************************************
  *  Private Definitions
@@ -67,7 +75,7 @@ static const struct ChppClient kWifiClientConfig = {
     .descriptor.version.patch = 0,
 
     // Notifies client if CHPP is reset
-    .resetNotifierFunctionPtr = NULL,
+    .resetNotifierFunctionPtr = &chppWifiClientNotifyReset,
 
     // Service response dispatch function pointer
     .responseDispatchFunctionPtr = &chppDispatchWifiResponse,
@@ -103,7 +111,9 @@ struct ChppWifiClientState {
 
   uint32_t capabilities;  // Cached GetCapabilities result
 
-  bool opened;  // WiFi has been successfully opened
+  bool scanMonitorEnabled;          // Scan monitoring is enabled
+  bool scanMonitorSilenceCallback;  // Silence callback during recovery from a
+                                    // service reset
 };
 
 // Note: This global definition of gWifiClientContext supports only one
@@ -128,8 +138,8 @@ static bool chppWifiClientRequestRanging(
 static void chppWifiClientReleaseRangingEvent(
     struct chreWifiRangingEvent *event);
 
-static void chppWifiOpenResult(struct ChppWifiClientState *clientContext,
-                               uint8_t *buf, size_t len);
+static void chppWiFiRecoverScanMonitor(
+    struct ChppWifiClientState *clientContext);
 static void chppWifiCloseResult(struct ChppWifiClientState *clientContext,
                                 uint8_t *buf, size_t len);
 static void chppWifiGetCapabilitiesResult(
@@ -172,7 +182,8 @@ static enum ChppAppErrorCode chppDispatchWifiResponse(void *clientContext,
   switch (rxHeader->command) {
     case CHPP_WIFI_OPEN: {
       chppClientTimestampResponse(&wifiClientContext->open, rxHeader);
-      chppWifiOpenResult(wifiClientContext, buf, len);
+      chppClientProcessOpenResponse(&wifiClientContext->client, buf, len);
+      chppWiFiRecoverScanMonitor(wifiClientContext);
       break;
     }
 
@@ -286,22 +297,41 @@ static void chppWifiClientDeinit(void *clientContext) {
 }
 
 /**
- * Handles the service response for the open client request.
- *
- * This function is called from chppDispatchWifiResponse().
+ * Notifies the client of an incoming reset.
  *
  * @param clientContext Maintains status for each client instance.
- * @param buf Input data. Cannot be null.
- * @param len Length of input data in bytes.
  */
-static void chppWifiOpenResult(struct ChppWifiClientState *clientContext,
-                               uint8_t *buf, size_t len) {
-  UNUSED_VAR(len);
+static void chppWifiClientNotifyReset(void *clientContext) {
+  struct ChppWifiClientState *wifiClientContext =
+      (struct ChppWifiClientState *)clientContext;
 
-  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
-  clientContext->opened = (rxHeader->error == CHPP_APP_ERROR_NONE);
-  if (!clientContext->opened) {
-    CHPP_LOGE("WiFi open failed at service");
+  if (wifiClientContext->client.openState != CHPP_OPEN_STATE_OPENED) {
+    CHPP_LOGW("WiFi client reset but client wasn't open");
+  } else {
+    CHPP_LOGI("WiFi client reopening");
+    chppClientSendOpenRequest(&gWifiClientContext.client,
+                              &gWifiClientContext.open, CHPP_WIFI_OPEN,
+                              /*reopen=*/true);
+  }
+}
+
+/**
+ * Restores the state of scan monitoring after an incoming reset.
+ *
+ * @param clientContext Maintains status for each client instance.
+ */
+static void chppWiFiRecoverScanMonitor(
+    struct ChppWifiClientState *clientContext) {
+  if (clientContext->scanMonitorEnabled) {
+    CHPP_LOGI("Re-enabling WiFi scan monitoring after reset");
+    clientContext->scanMonitorEnabled = false;
+    clientContext->scanMonitorSilenceCallback = true;
+
+    if (!chppWifiClientConfigureScanMonitor(true)) {
+      clientContext->scanMonitorSilenceCallback = false;
+      CHPP_LOGE("Unable to re-enable WiFi scan monitoring after reset");
+      CHPP_PROD_ASSERT(false);
+    }
   }
 }
 
@@ -342,8 +372,15 @@ static void chppWifiGetCapabilitiesResult(
     struct ChppWifiGetCapabilitiesParameters *result =
         &((struct ChppWifiGetCapabilitiesResponse *)buf)->params;
 
-    CHPP_LOGD("chppWifiGetCapabilitiesResult received capabilities=0x%" PRIx32,
+    CHPP_LOGI("chppWifiGetCapabilitiesResult received capabilities=0x%" PRIx32,
               result->capabilities);
+#ifdef CHPP_WIFI_DEFAULT_CAPABILITIES
+    if (result->capabilities != CHPP_WIFI_DEFAULT_CAPABILITIES) {
+      CHPP_LOGE("Unexpected capability: expected 0x%" PRIx32,
+                CHPP_WIFI_DEFAULT_CAPABILITIES);
+      CHPP_PROD_ASSERT(false);
+    }
+#endif
 
     clientContext->capabilities = result->capabilities;
   }
@@ -365,20 +402,31 @@ static void chppWifiConfigureScanMonitorResult(
   if (len < sizeof(struct ChppWifiConfigureScanMonitorAsyncResponse)) {
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
     CHPP_LOGE(
-        "WiFi ControlLocationSession request failed at service. error=%" PRIu8,
+        "WiFi ControlLocationSession request failed at service. "
+        "error=%" PRIu8,
         rxHeader->error);
 
   } else {
     struct ChppWifiConfigureScanMonitorAsyncResponseParameters *result =
         &((struct ChppWifiConfigureScanMonitorAsyncResponse *)buf)->params;
 
-    CHPP_LOGD(
+    gWifiClientContext.scanMonitorEnabled = result->enabled;
+    CHPP_LOGI(
         "chppWifiConfigureScanMonitorResult received enable=%s, "
         "errorCode=%" PRIu8,
         result->enabled ? "true" : "false", result->errorCode);
 
-    gCallbacks->scanMonitorStatusChangeCallback(result->enabled,
-                                                result->errorCode);
+    if (!gWifiClientContext.scanMonitorSilenceCallback) {
+      // Per the scanMonitorStatusChangeCallback API contract, unsolicited
+      // calls to scanMonitorStatusChangeCallback must not be made, and it
+      // should only be invoked as the direct result of an earlier call to
+      // configureScanMonitor.
+      gCallbacks->scanMonitorStatusChangeCallback(result->enabled,
+                                                  result->errorCode);
+    }  // Else, the WiFi subsystem has been reset and we are required to
+       // silently reenable the scan monitor.
+
+    gWifiClientContext.scanMonitorSilenceCallback = false;
   }
 }
 
@@ -404,7 +452,7 @@ static void chppWifiRequestScanResult(struct ChppWifiClientState *clientContext,
     struct ChppWifiRequestScanResponseParameters *result =
         &((struct ChppWifiRequestScanResponse *)buf)->params;
 
-    CHPP_LOGD("WiFi RequestScanResult request %ssuccessful at service",
+    CHPP_LOGI("WiFi RequestScanResult request %ssuccessful at service",
               result->pending ? "accepted and " : "FAILURE - accepted but un");
 
     gCallbacks->scanResponseCallback(result->pending, result->errorCode);
@@ -423,7 +471,7 @@ static void chppWifiRequestScanResult(struct ChppWifiClientState *clientContext,
 static void chppWifiScanEventNotification(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
-  CHPP_LOGD("chppWifiScanEventNotification received data len=%" PRIuSIZE, len);
+  CHPP_LOGI("chppWifiScanEventNotification received data len=%" PRIuSIZE, len);
 
   buf += sizeof(struct ChppAppHeader);
   len -= sizeof(struct ChppAppHeader);
@@ -437,6 +485,11 @@ static void chppWifiScanEventNotification(
         "len=%" PRIuSIZE,
         len);
   } else {
+#ifdef CHPP_CLIENT_ENABLED_TIMESYNC
+    chre->referenceTime -= (uint64_t)chppTimesyncGetOffset(
+        gWifiClientContext.client.appContext, CHPP_WIFI_MAX_TIMESYNC_AGE_NS);
+#endif
+
     gCallbacks->scanEventCallback(chre);
   }
 }
@@ -453,12 +506,26 @@ static void chppWifiScanEventNotification(
 static void chppWifiRangingEventNotification(
     struct ChppWifiClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
-  UNUSED_VAR(buf);
-  UNUSED_VAR(len);
 
-  // TODO: Use auto-generated parser to convert, i.e.
-  // chppWifiRangingEventToChre().
-  // gCallbacks->rangingEventCallback(chreResult);
+  CHPP_LOGD("chppWifiRangingEventNotification received data len=%" PRIuSIZE,
+            len);
+
+  buf += sizeof(struct ChppAppHeader);
+  len -= sizeof(struct ChppAppHeader);
+
+  struct chreWifiRangingEvent *chre =
+      chppWifiRangingEventToChre((struct ChppWifiRangingEvent *)buf, len);
+
+  uint8_t error = CHRE_ERROR_NONE;
+  if (chre == NULL) {
+    error = CHRE_ERROR;
+    CHPP_LOGE(
+        "chppWifiRangingEventNotification CHPP -> CHRE conversion failed. "
+        "Input len=%" PRIuSIZE,
+        len);
+  }
+
+  gCallbacks->rangingEventCallback(error, chre);
 }
 
 /**
@@ -475,33 +542,24 @@ static bool chppWifiClientOpen(const struct chrePalSystemApi *systemApi,
   CHPP_DEBUG_ASSERT(systemApi != NULL);
   CHPP_DEBUG_ASSERT(callbacks != NULL);
 
-  gWifiClientContext.opened = false;
+  bool result = false;
   gSystemApi = systemApi;
   gCallbacks = callbacks;
 
-  // Local
-  gWifiClientContext.capabilities = CHRE_WIFI_CAPABILITIES_NONE;
+  CHPP_LOGI("WiFi client opening");
 
-  // Wait for discovery to complete for "open" call to succeed
-  if (!chppWaitForDiscoveryComplete(gWifiClientContext.client.appContext,
-                                    CHPP_WIFI_DISCOVERY_TIMEOUT_MS)) {
-    CHPP_LOGE("Timed out waiting to discover CHPP WiFi service");
-  } else {
-    // Remote
-    struct ChppAppHeader *request = chppAllocClientRequestCommand(
-        &gWifiClientContext.client, CHPP_WIFI_OPEN);
-
-    if (request == NULL) {
-      CHPP_LOG_OOM();
-    } else {
-      chppSendTimestampedRequestAndWait(&gWifiClientContext.client,
-                                        &gWifiClientContext.open, request,
-                                        sizeof(*request));
-      // gWifiClientContext.opened is now set
-    }
+  if (chppWaitForDiscoveryComplete(gWifiClientContext.client.appContext,
+                                   CHPP_WIFI_DISCOVERY_TIMEOUT_MS)) {
+    result = chppClientSendOpenRequest(&gWifiClientContext.client,
+                                       &gWifiClientContext.open, CHPP_WIFI_OPEN,
+                                       /*reopen=*/false);
   }
 
-  return gWifiClientContext.opened;
+#ifdef CHPP_WIFI_CLIENT_OPEN_ALWAYS_SUCCESS
+  result = true;
+#endif
+
+  return result;
 }
 
 /**
@@ -517,7 +575,7 @@ static void chppWifiClientClose(void) {
   } else if (chppSendTimestampedRequestAndWait(&gWifiClientContext.client,
                                                &gWifiClientContext.close,
                                                request, sizeof(*request))) {
-    gWifiClientContext.opened = false;
+    gWifiClientContext.client.openState = CHPP_OPEN_STATE_CLOSED;
     gWifiClientContext.capabilities = CHRE_WIFI_CAPABILITIES_NONE;
   }
 }
@@ -529,7 +587,11 @@ static void chppWifiClientClose(void) {
  * @return Capabilities flags.
  */
 static uint32_t chppWifiClientGetCapabilities(void) {
+#ifdef CHPP_WIFI_DEFAULT_CAPABILITIES
+  uint32_t capabilities = CHPP_WIFI_DEFAULT_CAPABILITIES;
+#else
   uint32_t capabilities = CHRE_WIFI_CAPABILITIES_NONE;
+#endif
 
   if (gWifiClientContext.capabilities != CHRE_WIFI_CAPABILITIES_NONE) {
     // Result already cached
@@ -555,7 +617,7 @@ static uint32_t chppWifiClientGetCapabilities(void) {
 }
 
 /**
- * Enables/disables receiving unsolicited scan results.
+ * Enables/disables receiving unsolicited scan results (scan monitoring).
  *
  * @param enable True to enable.
  *
@@ -637,10 +699,26 @@ static void chppWifiClientReleaseScanEvent(struct chreWifiScanEvent *event) {
  */
 static bool chppWifiClientRequestRanging(
     const struct chreWifiRangingParams *params) {
-  // TODO
-  UNUSED_VAR(params);
+  struct ChppWifiRangingParamsWithHeader *request;
+  size_t requestLen;
 
-  return false;
+  bool result = chppWifiRangingParamsFromChre(params, &request, &requestLen);
+
+  if (!result) {
+    CHPP_LOG_OOM();
+  } else {
+    request->header.handle = gWifiClientContext.client.handle;
+    request->header.type = CHPP_MESSAGE_TYPE_CLIENT_REQUEST;
+    request->header.transaction = gWifiClientContext.client.transaction++;
+    request->header.error = CHPP_APP_ERROR_NONE;
+    request->header.command = CHPP_WIFI_REQUEST_RANGING_ASYNC;
+
+    result = chppSendTimestampedRequestOrFail(
+        &gWifiClientContext.client, &gWifiClientContext.requestRanging, request,
+        requestLen);
+  }
+
+  return result;
 }
 
 /**
