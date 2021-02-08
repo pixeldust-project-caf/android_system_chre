@@ -52,6 +52,7 @@ static bool chppWwanClientInit(void *clientContext, uint8_t handle,
                                struct ChppVersion serviceVersion);
 static void chppWwanClientDeinit(void *clientContext);
 static void chppWwanClientNotifyReset(void *clientContext);
+static void chppWwanClientNotifyMatch(void *clientContext);
 
 /************************************************
  *  Private Definitions
@@ -70,6 +71,9 @@ static const struct ChppClient kWwanClientConfig = {
 
     // Notifies client if CHPP is reset
     .resetNotifierFunctionPtr = &chppWwanClientNotifyReset,
+
+    // Notifies client if they are matched to a service
+    .matchNotifierFunctionPtr = &chppWwanClientNotifyMatch,
 
     // Service response dispatch function pointer
     .responseDispatchFunctionPtr = &chppDispatchWwanResponse,
@@ -242,6 +246,23 @@ static void chppWwanClientNotifyReset(void *clientContext) {
 }
 
 /**
+ * Notifies the client of being matched to a service.
+ *
+ * @param clientContext Maintains status for each client instance.
+ */
+static void chppWwanClientNotifyMatch(void *clientContext) {
+  struct ChppWwanClientState *wwanClientContext =
+      (struct ChppWwanClientState *)clientContext;
+
+  if (wwanClientContext->client.openState == CHPP_OPEN_STATE_PSEUDO_OPEN) {
+    CHPP_LOGI("Previously pseudo-open WWAN client reopening");
+    chppClientSendOpenRequest(&gWwanClientContext.client,
+                              &gWwanClientContext.open, CHPP_WWAN_OPEN,
+                              /*reopen=*/true);
+  }
+}
+
+/**
  * Handles the service response for the close client request.
  *
  * This function is called from chppDispatchWwanResponse().
@@ -271,14 +292,15 @@ static void chppWwanGetCapabilitiesResult(
     struct ChppWwanClientState *clientContext, uint8_t *buf, size_t len) {
   if (len < sizeof(struct ChppWwanGetCapabilitiesResponse)) {
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
-    CHPP_LOGE("WWAN GetCapabilities request failed at service. error=%" PRIu8,
+    CHPP_LOGE("GetCapabilities failed at service. err=%" PRIu8,
               rxHeader->error);
+    CHPP_ASSERT(rxHeader->error != CHPP_APP_ERROR_NONE);
 
   } else {
     struct ChppWwanGetCapabilitiesParameters *result =
         &((struct ChppWwanGetCapabilitiesResponse *)buf)->params;
 
-    CHPP_LOGI("chppWwanGetCapabilitiesResult received capabilities=0x%" PRIx32,
+    CHPP_LOGD("chppWwanGetCapabilitiesResult received capabilities=0x%" PRIx32,
               result->capabilities);
 #ifdef CHPP_WWAN_DEFAULT_CAPABILITIES
     if (result->capabilities != CHPP_WWAN_DEFAULT_CAPABILITIES) {
@@ -305,19 +327,45 @@ static void chppWwanGetCapabilitiesResult(
 static void chppWwanGetCellInfoAsyncResult(
     struct ChppWwanClientState *clientContext, uint8_t *buf, size_t len) {
   UNUSED_VAR(clientContext);
-  CHPP_LOGI("chppWwanGetCellInfoAsyncResult received data len=%" PRIuSIZE, len);
+  CHPP_LOGD("chppWwanGetCellInfoAsyncResult received data len=%" PRIuSIZE, len);
 
-  buf += sizeof(struct ChppAppHeader);
-  len -= sizeof(struct ChppAppHeader);
+  struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+  struct chreWwanCellInfoResult *chre = NULL;
 
-  struct chreWwanCellInfoResult *chre =
-      chppWwanCellInfoResultToChre((struct ChppWwanCellInfoResult *)buf, len);
+  if (len == sizeof(struct ChppAppHeader)) {
+    // Short response length indicates an error
+
+    if (rxHeader->error == CHPP_APP_ERROR_NONE) {
+      // But no error reported
+      CHPP_PROD_ASSERT(false);
+    } else {
+      CHPP_LOGE("GetCellInfo failed at service err=%" PRIu8, rxHeader->error);
+    }
+
+  } else {
+    buf += sizeof(struct ChppAppHeader);
+    len -= sizeof(struct ChppAppHeader);
+    chre =
+        chppWwanCellInfoResultToChre((struct ChppWwanCellInfoResult *)buf, len);
+
+    if (chre == NULL) {
+      CHPP_LOGE("Cell info conversion failed len=%" PRIuSIZE " err=%" PRIu8,
+                len, rxHeader->error);
+    }
+  }
 
   if (chre == NULL) {
-    CHPP_LOGE(
-        "chppWwanGetCellInfoAsyncResult CHPP -> CHRE conversion failed. Input "
-        "len=%" PRIuSIZE,
-        len);
+    chre = chppMalloc(sizeof(struct chreWwanCellInfoResult));
+    if (chre == NULL) {
+      CHPP_LOG_OOM();
+    } else {
+      chre->version = CHRE_WWAN_CELL_INFO_RESULT_VERSION;
+      chre->errorCode = CHRE_ERROR;
+      chre->cellInfoCount = 0;
+      chre->reserved = 0;
+      chre->cookie = 0;
+    }
+
   } else {
 #ifdef CHPP_CLIENT_ENABLED_TIMESYNC
     int64_t offset = chppTimesyncGetOffset(gWwanClientContext.client.appContext,
@@ -328,7 +376,9 @@ static void chppWwanGetCellInfoAsyncResult(
       *timeStamp -= (uint64_t)offset;
     }
 #endif
+  }
 
+  if (chre != NULL) {
     gCallbacks->cellInfoResultCallback(chre);
   }
 }
@@ -351,7 +401,7 @@ static bool chppWwanClientOpen(const struct chrePalSystemApi *systemApi,
   gSystemApi = systemApi;
   gCallbacks = callbacks;
 
-  CHPP_LOGI("WWAN client opening");
+  CHPP_LOGD("WWAN client opening");
 
   // Wait for discovery to complete for "open" call to succeed
   if (chppWaitForDiscoveryComplete(gWwanClientContext.client.appContext,
@@ -362,6 +412,7 @@ static bool chppWwanClientOpen(const struct chrePalSystemApi *systemApi,
   }
 
 #ifdef CHPP_WWAN_CLIENT_OPEN_ALWAYS_SUCCESS
+  chppClientPseudoOpen(&gWwanClientContext.client);
   result = true;
 #endif
 

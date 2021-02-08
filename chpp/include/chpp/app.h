@@ -150,10 +150,11 @@ enum ChppAppErrorCode {
  */
 enum ChppOpenState {
   CHPP_OPEN_STATE_CLOSED = 0,
-  CHPP_OPEN_STATE_OPENING = 1,  // Enables the open request to pass through
-  CHPP_OPEN_STATE_OPENED = 2,
-  CHPP_OPEN_STATE_REOPENING = 3,  // Enables the open request to pass through
-  CHPP_OPEN_STATE_WAITING_TO_REOPEN = 4,  // Waiting to reopen asynchronously
+  CHPP_OPEN_STATE_PSEUDO_OPEN = 1,  // Closed but open always returns success
+  CHPP_OPEN_STATE_OPENING = 2,      // Enables the open request to pass through
+  CHPP_OPEN_STATE_OPENED = 3,       // Opened
+  CHPP_OPEN_STATE_REOPENING = 4,    // Enables the open request to pass through
+  CHPP_OPEN_STATE_WAITING_TO_REOPEN = 5,  // Waiting to reopen asynchronously
 };
 
 /**
@@ -203,7 +204,7 @@ typedef void(ChppClientDeinitFunction)(void *context);
 /**
  * Function type that dispatches a reset notification to any client or service
  */
-typedef void(ChppResetNotifierFunction)(void *context);
+typedef void(ChppNotifierFunction)(void *context);
 
 /**
  * Length of a service UUID and its human-readable printed form in bytes
@@ -249,7 +250,7 @@ struct ChppService {
 
   //! Pointer to the function that is used to notify the service if CHPP is
   //! reset.
-  ChppResetNotifierFunction *resetNotifierFunctionPtr;
+  ChppNotifierFunction *resetNotifierFunctionPtr;
 
   //! Pointer to the function that dispatches incoming client requests for the
   //! service.
@@ -284,14 +285,22 @@ struct ChppClient {
 
   //! Pointer to the function that is used to notify the client if CHPP is
   //! reset.
-  ChppResetNotifierFunction *resetNotifierFunctionPtr;
+  ChppNotifierFunction *resetNotifierFunctionPtr;
+
+  //! Pointer to the function that is used to notify the client if CHPP is
+  //! matched to a service.
+  ChppNotifierFunction *matchNotifierFunctionPtr;
 
   //! Pointer to the function that dispatches incoming service responses for the
   //! client.
+  //! Service responses are only dispatched to clients that have been opened or
+  //! are in the process of being (re)opened. @see ChppOpenState
   ChppDispatchFunction *responseDispatchFunctionPtr;
 
   //! Pointer to the function that dispatches incoming service notifications for
   //! the client.
+  //! Service notifications are only dispatched to clients that have been
+  //! opened. @see ChppOpenState
   ChppDispatchFunction *notificationDispatchFunctionPtr;
 
   //! Pointer to the function that initializes the client (after it is matched

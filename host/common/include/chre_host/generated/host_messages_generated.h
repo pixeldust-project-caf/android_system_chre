@@ -520,8 +520,8 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(2) HostAddress FLATBUFFERS_FINAL_CLASS {
   uint16_t client_id_;
 
  public:
-  HostAddress()
-      : client_id_(0) {
+  HostAddress() {
+    memset(static_cast<void *>(this), 0, sizeof(HostAddress));
   }
   HostAddress(uint16_t _client_id)
       : client_id_(flatbuffers::EndianScalar(_client_id)) {
@@ -620,6 +620,7 @@ struct NanoappMessageBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  NanoappMessageBuilder &operator=(const NanoappMessageBuilder &);
   flatbuffers::Offset<NanoappMessage> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<NanoappMessage>(end);
@@ -685,6 +686,7 @@ struct HubInfoRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  HubInfoRequestBuilder &operator=(const HubInfoRequestBuilder &);
   flatbuffers::Offset<HubInfoRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<HubInfoRequest>(end);
@@ -894,6 +896,7 @@ struct HubInfoResponseBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  HubInfoResponseBuilder &operator=(const HubInfoResponseBuilder &);
   flatbuffers::Offset<HubInfoResponse> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<HubInfoResponse>(end);
@@ -992,6 +995,7 @@ struct NanoappListRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  NanoappListRequestBuilder &operator=(const NanoappListRequestBuilder &);
   flatbuffers::Offset<NanoappListRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<NanoappListRequest>(end);
@@ -1013,11 +1017,13 @@ struct NanoappListEntryT : public flatbuffers::NativeTable {
   uint32_t version;
   bool enabled;
   bool is_system;
+  uint32_t permissions;
   NanoappListEntryT()
       : app_id(0),
         version(0),
         enabled(true),
-        is_system(false) {
+        is_system(false),
+        permissions(0) {
   }
 };
 
@@ -1028,7 +1034,8 @@ struct NanoappListEntry FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_APP_ID = 4,
     VT_VERSION = 6,
     VT_ENABLED = 8,
-    VT_IS_SYSTEM = 10
+    VT_IS_SYSTEM = 10,
+    VT_PERMISSIONS = 12
   };
   uint64_t app_id() const {
     return GetField<uint64_t>(VT_APP_ID, 0);
@@ -1058,12 +1065,21 @@ struct NanoappListEntry FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   bool mutate_is_system(bool _is_system) {
     return SetField<uint8_t>(VT_IS_SYSTEM, static_cast<uint8_t>(_is_system), 0);
   }
+  /// Nanoapp permissions, if supported. Nanoapp permissions are required on
+  /// CHRE API v1.5+, and are defined in chre/util/system/napp_permissions.h
+  uint32_t permissions() const {
+    return GetField<uint32_t>(VT_PERMISSIONS, 0);
+  }
+  bool mutate_permissions(uint32_t _permissions) {
+    return SetField<uint32_t>(VT_PERMISSIONS, _permissions, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint64_t>(verifier, VT_APP_ID) &&
            VerifyField<uint32_t>(verifier, VT_VERSION) &&
            VerifyField<uint8_t>(verifier, VT_ENABLED) &&
            VerifyField<uint8_t>(verifier, VT_IS_SYSTEM) &&
+           VerifyField<uint32_t>(verifier, VT_PERMISSIONS) &&
            verifier.EndTable();
   }
   NanoappListEntryT *UnPack(const flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -1087,10 +1103,14 @@ struct NanoappListEntryBuilder {
   void add_is_system(bool is_system) {
     fbb_.AddElement<uint8_t>(NanoappListEntry::VT_IS_SYSTEM, static_cast<uint8_t>(is_system), 0);
   }
+  void add_permissions(uint32_t permissions) {
+    fbb_.AddElement<uint32_t>(NanoappListEntry::VT_PERMISSIONS, permissions, 0);
+  }
   explicit NanoappListEntryBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  NanoappListEntryBuilder &operator=(const NanoappListEntryBuilder &);
   flatbuffers::Offset<NanoappListEntry> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<NanoappListEntry>(end);
@@ -1103,9 +1123,11 @@ inline flatbuffers::Offset<NanoappListEntry> CreateNanoappListEntry(
     uint64_t app_id = 0,
     uint32_t version = 0,
     bool enabled = true,
-    bool is_system = false) {
+    bool is_system = false,
+    uint32_t permissions = 0) {
   NanoappListEntryBuilder builder_(_fbb);
   builder_.add_app_id(app_id);
+  builder_.add_permissions(permissions);
   builder_.add_version(version);
   builder_.add_is_system(is_system);
   builder_.add_enabled(enabled);
@@ -1156,6 +1178,7 @@ struct NanoappListResponseBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  NanoappListResponseBuilder &operator=(const NanoappListResponseBuilder &);
   flatbuffers::Offset<NanoappListResponse> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<NanoappListResponse>(end);
@@ -1391,6 +1414,7 @@ struct LoadNanoappRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  LoadNanoappRequestBuilder &operator=(const LoadNanoappRequestBuilder &);
   flatbuffers::Offset<LoadNanoappRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<LoadNanoappRequest>(end);
@@ -1526,6 +1550,7 @@ struct LoadNanoappResponseBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  LoadNanoappResponseBuilder &operator=(const LoadNanoappResponseBuilder &);
   flatbuffers::Offset<LoadNanoappResponse> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<LoadNanoappResponse>(end);
@@ -1616,6 +1641,7 @@ struct UnloadNanoappRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  UnloadNanoappRequestBuilder &operator=(const UnloadNanoappRequestBuilder &);
   flatbuffers::Offset<UnloadNanoappRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<UnloadNanoappRequest>(end);
@@ -1691,6 +1717,7 @@ struct UnloadNanoappResponseBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  UnloadNanoappResponseBuilder &operator=(const UnloadNanoappResponseBuilder &);
   flatbuffers::Offset<UnloadNanoappResponse> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<UnloadNanoappResponse>(end);
@@ -1765,6 +1792,7 @@ struct LogMessageBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  LogMessageBuilder &operator=(const LogMessageBuilder &);
   flatbuffers::Offset<LogMessage> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<LogMessage>(end);
@@ -1834,6 +1862,7 @@ struct TimeSyncMessageBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  TimeSyncMessageBuilder &operator=(const TimeSyncMessageBuilder &);
   flatbuffers::Offset<TimeSyncMessage> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<TimeSyncMessage>(end);
@@ -1881,6 +1910,7 @@ struct DebugDumpRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  DebugDumpRequestBuilder &operator=(const DebugDumpRequestBuilder &);
   flatbuffers::Offset<DebugDumpRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<DebugDumpRequest>(end);
@@ -1938,6 +1968,7 @@ struct DebugDumpDataBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  DebugDumpDataBuilder &operator=(const DebugDumpDataBuilder &);
   flatbuffers::Offset<DebugDumpData> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<DebugDumpData>(end);
@@ -2021,6 +2052,7 @@ struct DebugDumpResponseBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  DebugDumpResponseBuilder &operator=(const DebugDumpResponseBuilder &);
   flatbuffers::Offset<DebugDumpResponse> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<DebugDumpResponse>(end);
@@ -2068,6 +2100,7 @@ struct TimeSyncRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  TimeSyncRequestBuilder &operator=(const TimeSyncRequestBuilder &);
   flatbuffers::Offset<TimeSyncRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<TimeSyncRequest>(end);
@@ -2113,6 +2146,7 @@ struct LowPowerMicAccessRequestBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  LowPowerMicAccessRequestBuilder &operator=(const LowPowerMicAccessRequestBuilder &);
   flatbuffers::Offset<LowPowerMicAccessRequest> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<LowPowerMicAccessRequest>(end);
@@ -2156,6 +2190,7 @@ struct LowPowerMicAccessReleaseBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  LowPowerMicAccessReleaseBuilder &operator=(const LowPowerMicAccessReleaseBuilder &);
   flatbuffers::Offset<LowPowerMicAccessRelease> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<LowPowerMicAccessRelease>(end);
@@ -2228,6 +2263,7 @@ struct SettingChangeMessageBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  SettingChangeMessageBuilder &operator=(const SettingChangeMessageBuilder &);
   flatbuffers::Offset<SettingChangeMessage> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<SettingChangeMessage>(end);
@@ -2250,7 +2286,9 @@ flatbuffers::Offset<SettingChangeMessage> CreateSettingChangeMessage(flatbuffers
 struct LogMessageV2T : public flatbuffers::NativeTable {
   typedef LogMessageV2 TableType;
   std::vector<int8_t> buffer;
-  LogMessageV2T() {
+  uint32_t num_logs_dropped;
+  LogMessageV2T()
+      : num_logs_dropped(0) {
   }
 };
 
@@ -2259,7 +2297,8 @@ struct LogMessageV2 FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef LogMessageV2T NativeTableType;
   typedef LogMessageV2Builder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_BUFFER = 4
+    VT_BUFFER = 4,
+    VT_NUM_LOGS_DROPPED = 6
   };
   /// A buffer containing formatted log data. A flat array is used here to avoid
   /// overhead in serializing and deserializing. The format is as follows:
@@ -2281,10 +2320,18 @@ struct LogMessageV2 FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   flatbuffers::Vector<int8_t> *mutable_buffer() {
     return GetPointer<flatbuffers::Vector<int8_t> *>(VT_BUFFER);
   }
+  /// The number of logs dropped since CHRE started
+  uint32_t num_logs_dropped() const {
+    return GetField<uint32_t>(VT_NUM_LOGS_DROPPED, 0);
+  }
+  bool mutate_num_logs_dropped(uint32_t _num_logs_dropped) {
+    return SetField<uint32_t>(VT_NUM_LOGS_DROPPED, _num_logs_dropped, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_BUFFER) &&
            verifier.VerifyVector(buffer()) &&
+           VerifyField<uint32_t>(verifier, VT_NUM_LOGS_DROPPED) &&
            verifier.EndTable();
   }
   LogMessageV2T *UnPack(const flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -2299,10 +2346,14 @@ struct LogMessageV2Builder {
   void add_buffer(flatbuffers::Offset<flatbuffers::Vector<int8_t>> buffer) {
     fbb_.AddOffset(LogMessageV2::VT_BUFFER, buffer);
   }
+  void add_num_logs_dropped(uint32_t num_logs_dropped) {
+    fbb_.AddElement<uint32_t>(LogMessageV2::VT_NUM_LOGS_DROPPED, num_logs_dropped, 0);
+  }
   explicit LogMessageV2Builder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  LogMessageV2Builder &operator=(const LogMessageV2Builder &);
   flatbuffers::Offset<LogMessageV2> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<LogMessageV2>(end);
@@ -2312,19 +2363,23 @@ struct LogMessageV2Builder {
 
 inline flatbuffers::Offset<LogMessageV2> CreateLogMessageV2(
     flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::Vector<int8_t>> buffer = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<int8_t>> buffer = 0,
+    uint32_t num_logs_dropped = 0) {
   LogMessageV2Builder builder_(_fbb);
+  builder_.add_num_logs_dropped(num_logs_dropped);
   builder_.add_buffer(buffer);
   return builder_.Finish();
 }
 
 inline flatbuffers::Offset<LogMessageV2> CreateLogMessageV2Direct(
     flatbuffers::FlatBufferBuilder &_fbb,
-    const std::vector<int8_t> *buffer = nullptr) {
+    const std::vector<int8_t> *buffer = nullptr,
+    uint32_t num_logs_dropped = 0) {
   auto buffer__ = buffer ? _fbb.CreateVector<int8_t>(*buffer) : 0;
   return chre::fbs::CreateLogMessageV2(
       _fbb,
-      buffer__);
+      buffer__,
+      num_logs_dropped);
 }
 
 flatbuffers::Offset<LogMessageV2> CreateLogMessageV2(flatbuffers::FlatBufferBuilder &_fbb, const LogMessageV2T *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -2533,6 +2588,7 @@ struct MessageContainerBuilder {
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
+  MessageContainerBuilder &operator=(const MessageContainerBuilder &);
   flatbuffers::Offset<MessageContainer> Finish() {
     const auto end = fbb_.EndTable(start_);
     auto o = flatbuffers::Offset<MessageContainer>(end);
@@ -2709,6 +2765,7 @@ inline void NanoappListEntry::UnPackTo(NanoappListEntryT *_o, const flatbuffers:
   { auto _e = version(); _o->version = _e; }
   { auto _e = enabled(); _o->enabled = _e; }
   { auto _e = is_system(); _o->is_system = _e; }
+  { auto _e = permissions(); _o->permissions = _e; }
 }
 
 inline flatbuffers::Offset<NanoappListEntry> NanoappListEntry::Pack(flatbuffers::FlatBufferBuilder &_fbb, const NanoappListEntryT* _o, const flatbuffers::rehasher_function_t *_rehasher) {
@@ -2723,12 +2780,14 @@ inline flatbuffers::Offset<NanoappListEntry> CreateNanoappListEntry(flatbuffers:
   auto _version = _o->version;
   auto _enabled = _o->enabled;
   auto _is_system = _o->is_system;
+  auto _permissions = _o->permissions;
   return chre::fbs::CreateNanoappListEntry(
       _fbb,
       _app_id,
       _version,
       _enabled,
-      _is_system);
+      _is_system,
+      _permissions);
 }
 
 inline NanoappListResponseT *NanoappListResponse::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
@@ -3141,6 +3200,7 @@ inline void LogMessageV2::UnPackTo(LogMessageV2T *_o, const flatbuffers::resolve
   (void)_o;
   (void)_resolver;
   { auto _e = buffer(); if (_e) { _o->buffer.resize(_e->size()); for (flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->buffer[_i] = _e->Get(_i); } } }
+  { auto _e = num_logs_dropped(); _o->num_logs_dropped = _e; }
 }
 
 inline flatbuffers::Offset<LogMessageV2> LogMessageV2::Pack(flatbuffers::FlatBufferBuilder &_fbb, const LogMessageV2T* _o, const flatbuffers::rehasher_function_t *_rehasher) {
@@ -3152,9 +3212,11 @@ inline flatbuffers::Offset<LogMessageV2> CreateLogMessageV2(flatbuffers::FlatBuf
   (void)_o;
   struct _VectorArgs { flatbuffers::FlatBufferBuilder *__fbb; const LogMessageV2T* __o; const flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
   auto _buffer = _o->buffer.size() ? _fbb.CreateVector(_o->buffer) : 0;
+  auto _num_logs_dropped = _o->num_logs_dropped;
   return chre::fbs::CreateLogMessageV2(
       _fbb,
-      _buffer);
+      _buffer,
+      _num_logs_dropped);
 }
 
 inline MessageContainerT *MessageContainer::UnPack(const flatbuffers::resolver_function_t *_resolver) const {

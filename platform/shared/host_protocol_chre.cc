@@ -148,9 +148,10 @@ void HostProtocolChre::encodeHubInfoResponse(
 void HostProtocolChre::addNanoappListEntry(
     ChreFlatBufferBuilder &builder,
     DynamicVector<Offset<fbs::NanoappListEntry>> &offsetVector, uint64_t appId,
-    uint32_t appVersion, bool enabled, bool isSystemNanoapp) {
+    uint32_t appVersion, bool enabled, bool isSystemNanoapp,
+    uint32_t appPermissions) {
   auto offset = fbs::CreateNanoappListEntry(builder, appId, appVersion, enabled,
-                                            isSystemNanoapp);
+                                            isSystemNanoapp, appPermissions);
   if (!offsetVector.push_back(offset)) {
     LOGE("Couldn't push nanoapp list entry offset!");
   }
@@ -198,10 +199,12 @@ void HostProtocolChre::encodeLogMessages(ChreFlatBufferBuilder &builder,
 
 void HostProtocolChre::encodeLogMessagesV2(ChreFlatBufferBuilder &builder,
                                            const uint8_t *logBuffer,
-                                           size_t bufferSize) {
+                                           size_t bufferSize,
+                                           uint32_t numLogsDropped) {
   auto logBufferOffset = builder.CreateVector(
       reinterpret_cast<const int8_t *>(logBuffer), bufferSize);
-  auto message = fbs::CreateLogMessageV2(builder, logBufferOffset);
+  auto message =
+      fbs::CreateLogMessageV2(builder, logBufferOffset, numLogsDropped);
   finalize(builder, fbs::ChreMessage::LogMessageV2, message.Union());
 }
 
