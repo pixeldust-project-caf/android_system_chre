@@ -79,31 +79,34 @@ enum class Setting : int8_t {
   LOCATION = 0,
   WIFI_AVAILABLE = 1,
   AIRPLANE_MODE = 2,
+  GLOBAL_MIC_DISABLE = 3,
   MIN = LOCATION,
-  MAX = AIRPLANE_MODE
+  MAX = GLOBAL_MIC_DISABLE
 };
 
-inline const Setting (&EnumValuesSetting())[3] {
+inline const Setting (&EnumValuesSetting())[4] {
   static const Setting values[] = {
     Setting::LOCATION,
     Setting::WIFI_AVAILABLE,
-    Setting::AIRPLANE_MODE
+    Setting::AIRPLANE_MODE,
+    Setting::GLOBAL_MIC_DISABLE
   };
   return values;
 }
 
 inline const char * const *EnumNamesSetting() {
-  static const char * const names[4] = {
+  static const char * const names[5] = {
     "LOCATION",
     "WIFI_AVAILABLE",
     "AIRPLANE_MODE",
+    "GLOBAL_MIC_DISABLE",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameSetting(Setting e) {
-  if (flatbuffers::IsOutRange(e, Setting::LOCATION, Setting::AIRPLANE_MODE)) return "";
+  if (flatbuffers::IsOutRange(e, Setting::LOCATION, Setting::GLOBAL_MIC_DISABLE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesSetting()[index];
 }
@@ -332,7 +335,9 @@ struct NanoappMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_APP_ID = 4,
     VT_MESSAGE_TYPE = 6,
     VT_HOST_ENDPOINT = 8,
-    VT_MESSAGE = 10
+    VT_MESSAGE = 10,
+    VT_MESSAGE_PERMISSIONS = 12,
+    VT_PERMISSIONS = 14
   };
   uint64_t app_id() const {
     return GetField<uint64_t>(VT_APP_ID, 0);
@@ -350,6 +355,19 @@ struct NanoappMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   const flatbuffers::Vector<uint8_t> *message() const {
     return GetPointer<const flatbuffers::Vector<uint8_t> *>(VT_MESSAGE);
   }
+  /// List of Android permissions that cover the contents of a message from a
+  /// nanoapp to the host.
+  /// These permissions are used to record and attribute access to
+  /// permissions-controlled resources.
+  uint32_t message_permissions() const {
+    return GetField<uint32_t>(VT_MESSAGE_PERMISSIONS, 0);
+  }
+  /// List of Android permissions declared by the nanoapp / granted to the host.
+  /// For messages from a nanoaapp to the host, this must be a superset of
+  /// message_permissions.
+  uint32_t permissions() const {
+    return GetField<uint32_t>(VT_PERMISSIONS, 0);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint64_t>(verifier, VT_APP_ID) &&
@@ -357,6 +375,8 @@ struct NanoappMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<uint16_t>(verifier, VT_HOST_ENDPOINT) &&
            VerifyOffsetRequired(verifier, VT_MESSAGE) &&
            verifier.VerifyVector(message()) &&
+           VerifyField<uint32_t>(verifier, VT_MESSAGE_PERMISSIONS) &&
+           VerifyField<uint32_t>(verifier, VT_PERMISSIONS) &&
            verifier.EndTable();
   }
 };
@@ -377,6 +397,12 @@ struct NanoappMessageBuilder {
   void add_message(flatbuffers::Offset<flatbuffers::Vector<uint8_t>> message) {
     fbb_.AddOffset(NanoappMessage::VT_MESSAGE, message);
   }
+  void add_message_permissions(uint32_t message_permissions) {
+    fbb_.AddElement<uint32_t>(NanoappMessage::VT_MESSAGE_PERMISSIONS, message_permissions, 0);
+  }
+  void add_permissions(uint32_t permissions) {
+    fbb_.AddElement<uint32_t>(NanoappMessage::VT_PERMISSIONS, permissions, 0);
+  }
   explicit NanoappMessageBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -395,9 +421,13 @@ inline flatbuffers::Offset<NanoappMessage> CreateNanoappMessage(
     uint64_t app_id = 0,
     uint32_t message_type = 0,
     uint16_t host_endpoint = 65534,
-    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> message = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> message = 0,
+    uint32_t message_permissions = 0,
+    uint32_t permissions = 0) {
   NanoappMessageBuilder builder_(_fbb);
   builder_.add_app_id(app_id);
+  builder_.add_permissions(permissions);
+  builder_.add_message_permissions(message_permissions);
   builder_.add_message(message);
   builder_.add_message_type(message_type);
   builder_.add_host_endpoint(host_endpoint);
@@ -409,14 +439,18 @@ inline flatbuffers::Offset<NanoappMessage> CreateNanoappMessageDirect(
     uint64_t app_id = 0,
     uint32_t message_type = 0,
     uint16_t host_endpoint = 65534,
-    const std::vector<uint8_t> *message = nullptr) {
+    const std::vector<uint8_t> *message = nullptr,
+    uint32_t message_permissions = 0,
+    uint32_t permissions = 0) {
   auto message__ = message ? _fbb.CreateVector<uint8_t>(*message) : 0;
   return chre::fbs::CreateNanoappMessage(
       _fbb,
       app_id,
       message_type,
       host_endpoint,
-      message__);
+      message__,
+      message_permissions,
+      permissions);
 }
 
 struct HubInfoRequest FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {

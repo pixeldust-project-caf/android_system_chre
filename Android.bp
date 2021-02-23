@@ -14,6 +14,36 @@
  * limitations under the License.
  */
 
+package {
+    default_applicable_licenses: ["system_chre_license"],
+}
+
+// Added automatically by a large-scale-change that took the approach of
+// 'apply every license found to every target'. While this makes sure we respect
+// every license restriction, it may not be entirely correct.
+//
+// e.g. GPL in an MIT project might only apply to the contrib/ directory.
+//
+// Please consider splitting the single license below into multiple licenses,
+// taking care not to lose any license_kind information, and overriding the
+// default license using the 'licenses: [...]' property on targets as needed.
+//
+// For unused files, consider creating a 'fileGroup' with "//visibility:private"
+// to attach the license to, and including a comment whether the files may be
+// used in the current project.
+// See: http://go/android-license-faq
+license {
+    name: "system_chre_license",
+    visibility: [":__subpackages__"],
+    license_kinds: [
+        "SPDX-license-identifier-Apache-2.0",
+        "SPDX-license-identifier-BSD",
+    ],
+    license_text: [
+        "NOTICE",
+    ],
+}
+
 cc_library_static {
     name: "chre_client",
     vendor: true,
@@ -118,10 +148,12 @@ cc_library_shared {
     relative_install_path: "hw",
     srcs: [
         "host/hal_generic/V1_0/generic_context_hub_v1_0.cc",
+        "host/hal_generic/common/permissions_util.cc",
     ],
     cflags: ["-Wall", "-Werror"],
     header_libs: [
         "android.hardware.contexthub@1.X-shared-impl",
+        "android.hardware.contexthub@1.X-common-utils",
     ],
     shared_libs: [
         "libcutils",
@@ -129,6 +161,8 @@ cc_library_shared {
         "libhidlbase",
         "libutils",
         "android.hardware.contexthub@1.0",
+        "android.hardware.contexthub@1.1",
+        "android.hardware.contexthub@1.2",
     ],
     static_libs: ["chre_client"],
 }
@@ -142,11 +176,13 @@ cc_binary {
         "host/hal_generic/V1_1/generic_context_hub_v1_1.cc",
         "host/hal_generic/V1_1/service.cc",
         "host/hal_generic/common/context_hub_settings_util.cc",
+        "host/hal_generic/common/permissions_util.cc",
     ],
     init_rc: ["host/hal_generic/V1_1/android.hardware.contexthub@1.1-service-generic.rc"],
     cflags: ["-Wall", "-Werror"],
     header_libs: [
         "android.hardware.contexthub@1.X-shared-impl",
+        "android.hardware.contexthub@1.X-common-utils",
     ],
     shared_libs: [
         "libcutils",
@@ -170,11 +206,13 @@ cc_binary {
         "host/hal_generic/V1_2/generic_context_hub_v1_2.cc",
         "host/hal_generic/V1_2/service.cc",
         "host/hal_generic/common/context_hub_settings_util.cc",
+        "host/hal_generic/common/permissions_util.cc",
     ],
     init_rc: ["host/hal_generic/V1_2/android.hardware.contexthub@1.2-service-generic.rc"],
     cflags: ["-Wall", "-Werror"],
     header_libs: [
         "android.hardware.contexthub@1.X-shared-impl",
+        "android.hardware.contexthub@1.X-common-utils",
     ],
     shared_libs: [
         "libcutils",
@@ -200,6 +238,7 @@ cc_binary {
         "host/hal_generic/V1_2/generic_context_hub_v1_2.cc",
         "host/hal_generic/V1_2/service.cc",
         "host/hal_generic/common/context_hub_settings_util.cc",
+        "host/hal_generic/common/permissions_util.cc",
     ],
     init_rc: ["host/hal_generic/V1_2/android.hardware.contexthub@1.2-service-small_fragments.rc"],
     cflags: [
@@ -209,6 +248,7 @@ cc_binary {
     ],
     header_libs: [
         "android.hardware.contexthub@1.X-shared-impl",
+        "android.hardware.contexthub@1.X-common-utils",
     ],
     shared_libs: [
         "libcutils",
