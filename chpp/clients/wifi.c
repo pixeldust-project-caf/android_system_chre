@@ -358,8 +358,8 @@ static void chppWiFiRecoverScanMonitor(
 
     if (!chppWifiClientConfigureScanMonitor(true)) {
       clientContext->scanMonitorSilenceCallback = false;
-      CHPP_LOGE("Unable to re-enable WiFi scan monitoring after reset");
-      CHPP_PROD_ASSERT(false);
+      CHPP_ASSERT_LOG(false,
+                      "Unable to re-enable WiFi scan monitoring after reset");
     }
   }
 }
@@ -395,7 +395,9 @@ static void chppWifiGetCapabilitiesResult(
   if (len < sizeof(struct ChppWifiGetCapabilitiesResponse)) {
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
     CHPP_LOGE("GetCapabilities failed at service err=%" PRIu8, rxHeader->error);
-    CHPP_ASSERT(rxHeader->error != CHPP_APP_ERROR_NONE);
+    if (rxHeader->error == CHPP_APP_ERROR_NONE) {
+      CHPP_LOGE("Missing err");
+    }
 
   } else {
     struct ChppWifiGetCapabilitiesParameters *result =
@@ -403,12 +405,11 @@ static void chppWifiGetCapabilitiesResult(
 
     CHPP_LOGD("chppWifiGetCapabilitiesResult received capabilities=0x%" PRIx32,
               result->capabilities);
+
 #ifdef CHPP_WIFI_DEFAULT_CAPABILITIES
-    if (result->capabilities != CHPP_WIFI_DEFAULT_CAPABILITIES) {
-      CHPP_LOGE("Unexpected capability 0x%" PRIx32 " != 0x%" PRIx32,
-                result->capabilities, CHPP_WIFI_DEFAULT_CAPABILITIES);
-      CHPP_PROD_ASSERT(false);
-    }
+    CHPP_ASSERT_LOG((result->capabilities == CHPP_WIFI_DEFAULT_CAPABILITIES),
+                    "Unexpected capability 0x%" PRIx32 " != 0x%" PRIx32,
+                    result->capabilities, CHPP_WIFI_DEFAULT_CAPABILITIES);
 #endif
 
     clientContext->capabilities = result->capabilities;
@@ -432,14 +433,11 @@ static void chppWifiConfigureScanMonitorResult(
     // Short response length indicates an error
 
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE("Scan monitor failed at service err=%" PRIu8, rxHeader->error);
     if (rxHeader->error == CHPP_APP_ERROR_NONE) {
-      // But no error reported
-      CHPP_PROD_ASSERT(false);
+      CHPP_LOGE("Missing err");
     } else {
-      CHPP_LOGD(
-          "Scan monitor failed at service. "
-          "err=%" PRIu8,
-          rxHeader->error);
+      // TODO (b/182309999): Remove else and always call
       gCallbacks->scanMonitorStatusChangeCallback(false, CHRE_ERROR);
     }
 
@@ -449,9 +447,9 @@ static void chppWifiConfigureScanMonitorResult(
 
     gWifiClientContext.scanMonitorEnabled = result->enabled;
     CHPP_LOGD(
-        "chppWifiConfigureScanMonitorResult received enable=%s, "
+        "chppWifiConfigureScanMonitorResult received enable=%d, "
         "errorCode=%" PRIu8,
-        result->enabled ? "true" : "false", result->errorCode);
+        result->enabled, result->errorCode);
 
     if (!gWifiClientContext.scanMonitorSilenceCallback) {
       // Per the scanMonitorStatusChangeCallback API contract, unsolicited
@@ -484,11 +482,11 @@ static void chppWifiRequestScanResult(struct ChppWifiClientState *clientContext,
     // Short response length indicates an error
 
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE("Scan request failed at service err=%" PRIu8, rxHeader->error);
     if (rxHeader->error == CHPP_APP_ERROR_NONE) {
-      // But no error reported
-      CHPP_PROD_ASSERT(false);
+      CHPP_LOGE("Missing err");
     } else {
-      CHPP_LOGD("Scan request failed at service. err=%" PRIu8, rxHeader->error);
+      // TODO (b/182309999): Remove else and always call
       gCallbacks->scanResponseCallback(false, CHRE_ERROR);
     }
 
@@ -496,8 +494,7 @@ static void chppWifiRequestScanResult(struct ChppWifiClientState *clientContext,
     struct ChppWifiRequestScanResponseParameters *result =
         &((struct ChppWifiRequestScanResponse *)buf)->params;
 
-    CHPP_LOGI("Scan request %ssuccessful at service",
-              result->pending ? "accepted and " : "FAILURE - accepted but un");
+    CHPP_LOGI("Scan request success=%d (at service)", result->pending);
 
     gCallbacks->scanResponseCallback(result->pending, result->errorCode);
   }
@@ -520,9 +517,13 @@ static void chppWifiRequestRangingResult(
   struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
 
   if (rxHeader->error != CHPP_APP_ERROR_NONE) {
-    CHPP_LOGE("Ranging request failed at service. err=%" PRIu8,
-              rxHeader->error);
-    gCallbacks->rangingEventCallback(CHRE_ERROR, NULL);
+    CHPP_LOGE("Ranging request failed at service err=%" PRIu8, rxHeader->error);
+    if (rxHeader->error == CHPP_APP_ERROR_NONE) {
+      CHPP_LOGE("Missing err");
+    } else {
+      // TODO (b/182309999): Remove else and always call
+      gCallbacks->rangingEventCallback(CHRE_ERROR, NULL);
+    }
 
   } else {
     CHPP_LOGD("Ranging request accepted at service");

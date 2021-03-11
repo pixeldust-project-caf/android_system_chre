@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+
 package {
     // See: http://go/android-license-faq
     // A large-scale-change added 'default_applicable_licenses' to import
@@ -80,10 +81,10 @@ cc_library_static {
         "services/wifi.c",
         "services/wwan.c",
         "platform/pal_api.c",
-        "platform/linux/crc.c",
         "platform/linux/link.c",
         "platform/linux/memory.c",
         "platform/linux/notifier.c",
+        "platform/shared/crc.c",
     ],
     export_include_dirs: [
         "platform/linux/include",
@@ -127,6 +128,9 @@ cc_test_host {
     cflags: [
         "-Wcast-align",
         "-Wsign-compare",
+    ],
+    header_libs: [
+        "chre_test_common",
     ],
     srcs: [
         "test/wifi_convert_test.cpp",

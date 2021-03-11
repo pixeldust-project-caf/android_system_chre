@@ -19,6 +19,7 @@
 
 #include "chre_host/daemon_base.h"
 #include "chre_host/log.h"
+#include "chre_host/napp_header.h"
 
 #include <json/json.h>
 
@@ -34,12 +35,13 @@ void ChreDaemonBase::loadPreloadedNanoapps() {
       "/vendor/etc/chre/preloaded_nanoapps.json";
   std::ifstream configFileStream(kPreloadedNanoappsConfigPath);
 
-  Json::Reader reader;
+  Json::CharReaderBuilder builder;
   Json::Value config;
   if (!configFileStream) {
     LOGE("Failed to open config file '%s': %d (%s)",
          kPreloadedNanoappsConfigPath, errno, strerror(errno));
-  } else if (!reader.parse(configFileStream, config)) {
+  } else if (!Json::parseFromStream(builder, configFileStream, &config,
+                                    /* errorMessage = */ nullptr)) {
     LOGE("Failed to parse nanoapp config file");
   } else if (!config.isMember("nanoapps") || !config.isMember("source_dir")) {
     LOGE("Malformed preloaded nanoapps config");
@@ -73,20 +75,6 @@ void ChreDaemonBase::loadPreloadedNanoapp(const std::string &directory,
 bool ChreDaemonBase::loadNanoapp(const std::vector<uint8_t> &header,
                                  const std::string &nanoappName,
                                  uint32_t transactionId) {
-  // This struct comes from build/build_template.mk and must not be modified.
-  // Refer to that file for more details.
-  struct NanoAppBinaryHeader {
-    uint32_t headerVersion;
-    uint32_t magic;
-    uint64_t appId;
-    uint32_t appVersion;
-    uint32_t flags;
-    uint64_t hwHubType;
-    uint8_t targetChreApiMajorVersion;
-    uint8_t targetChreApiMinorVersion;
-    uint8_t reserved[6];
-  } __attribute__((packed));
-
   bool success = false;
   if (header.size() != sizeof(NanoAppBinaryHeader)) {
     LOGE("Header size mismatch");

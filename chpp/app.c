@@ -620,32 +620,9 @@ void chppAppInitWithClientServiceSet(
     struct ChppClientServiceSet clientServiceSet) {
   CHPP_NOT_NULL(appContext);
 
-  memset(appContext, 0, sizeof(*appContext));
-  chppAppInitTransient(appContext, transportContext, clientServiceSet);
-}
-
-void chppAppInitTransient(struct ChppAppState *appContext,
-                          struct ChppTransportState *transportContext,
-                          struct ChppClientServiceSet clientServiceSet) {
-  CHPP_NOT_NULL(appContext);
-  CHPP_NOT_NULL(transportContext);
-
   CHPP_LOGD("App Init");
 
-  // Don't reset entire ChppAppState to avoid clearing non-transient
-  // contents e.g. discovery mutex/condvar/states.
-  appContext->registeredServiceCount = 0;
-  memset(appContext->registeredServices, 0,
-         sizeof(appContext->registeredServices));
-  memset(appContext->registeredServiceContexts, 0,
-         sizeof(appContext->registeredServiceContexts));
-  appContext->registeredClientCount = 0;
-  memset(appContext->registeredClients, 0,
-         sizeof(appContext->registeredClients));
-  memset(appContext->registeredClientContexts, 0,
-         sizeof(appContext->registeredClientContexts));
-  memset(appContext->clientIndexOfServiceIndex, 0,
-         sizeof(appContext->clientIndexOfServiceIndex));
+  memset(appContext, 0, sizeof(*appContext));
 
   appContext->clientServiceSet = clientServiceSet;
   appContext->transportContext = transportContext;
@@ -728,10 +705,9 @@ void chppAppProcessRxReset(struct ChppAppState *context) {
         ChppNotifierFunction *ResetNotifierFunction =
             chppGetClientResetNotifierFunction(context, clientIndex);
 
-        CHPP_LOGD(
-            "Client #%" PRIu8 " (H#%d) reset notifier %s", clientIndex,
-            CHPP_SERVICE_HANDLE_OF_INDEX(i),
-            (ResetNotifierFunction == NULL) ? "is unsupported" : "starting");
+        CHPP_LOGD("Client #%" PRIu8 " (H#%d) reset notifier found=%d",
+                  clientIndex, CHPP_SERVICE_HANDLE_OF_INDEX(i),
+                  (ResetNotifierFunction != NULL));
 
         if (ResetNotifierFunction != NULL) {
           ResetNotifierFunction(context->registeredClientContexts[clientIndex]);
@@ -745,9 +721,8 @@ void chppAppProcessRxReset(struct ChppAppState *context) {
     ChppNotifierFunction *ResetNotifierFunction =
         chppGetServiceResetNotifierFunction(context, i);
 
-    CHPP_LOGD("Service #%" PRIu8 " (H#%d) reset notifier %s", i,
-              CHPP_SERVICE_HANDLE_OF_INDEX(i),
-              (ResetNotifierFunction == NULL) ? "is unsupported" : "starting");
+    CHPP_LOGD("Service #%" PRIu8 " (H#%d) reset notifier found=%d", i,
+              CHPP_SERVICE_HANDLE_OF_INDEX(i), (ResetNotifierFunction != NULL));
 
     if (ResetNotifierFunction != NULL) {
       ResetNotifierFunction(context->registeredServiceContexts[i]);

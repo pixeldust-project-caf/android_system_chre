@@ -235,12 +235,8 @@ ChppAppHeader *addAppHeaderToBuf(uint8_t *buf, size_t *location) {
 void addTransportFooterToBuf(uint8_t *buf, size_t *location) {
   uint32_t *checksum = (uint32_t *)&buf[*location];
 
-#ifdef CHPP_CHECKSUM_ENABLED
   *checksum = chppCrc32(0, &buf[CHPP_PREAMBLE_LEN_BYTES],
                         *location - CHPP_PREAMBLE_LEN_BYTES);
-#else
-  *checksum = 1;
-#endif  // CHPP_CHECKSUM_ENABLED
 
   *location += sizeof(ChppTransportFooter);
 }
@@ -626,7 +622,6 @@ TEST_P(TransportTests, DiscoveryAndTransactionID) {
   EXPECT_EQ(services[0].version.patch, wwanServiceDescriptor.version.patch);
 }
 
-#ifdef CHPP_CHECKSUM_ENABLED
 /**
  * CRC-32 calculation for several pre-known test vectors.
  */
@@ -695,7 +690,6 @@ TEST_F(TransportTests, CRC32DaisyChained) {
     }
   }
 }
-#endif  // CHPP_CHECKSUM_ENABLED
 
 /**
  * WWAN service Open and GetCapabilities.
