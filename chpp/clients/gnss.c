@@ -375,9 +375,10 @@ static void chppGnssGetCapabilitiesResult(
     struct ChppGnssClientState *clientContext, uint8_t *buf, size_t len) {
   if (len < sizeof(struct ChppGnssGetCapabilitiesResponse)) {
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
-    CHPP_LOGE("GNSS GetCapabilities failed at service. err=%" PRIu8,
-              rxHeader->error);
-    CHPP_ASSERT(rxHeader->error != CHPP_APP_ERROR_NONE);
+    CHPP_LOGE("GetCapabilities failed at service err=%" PRIu8, rxHeader->error);
+    if (rxHeader->error == CHPP_APP_ERROR_NONE) {
+      CHPP_LOGE("Missing err");
+    }
 
   } else {
     struct ChppGnssGetCapabilitiesParameters *result =
@@ -385,12 +386,11 @@ static void chppGnssGetCapabilitiesResult(
 
     CHPP_LOGD("chppGnssGetCapabilitiesResult received capabilities=0x%" PRIx32,
               result->capabilities);
+
 #ifdef CHPP_GNSS_DEFAULT_CAPABILITIES
-    if (result->capabilities != CHPP_GNSS_DEFAULT_CAPABILITIES) {
-      CHPP_LOGE("Unexpected capability 0x%" PRIx32 " != 0x%" PRIx32,
-                result->capabilities, CHPP_GNSS_DEFAULT_CAPABILITIES);
-      CHPP_PROD_ASSERT(false);
-    }
+    CHPP_ASSERT_LOG((result->capabilities == CHPP_GNSS_DEFAULT_CAPABILITIES),
+                    "Unexpected capability 0x%" PRIx32 " != 0x%" PRIx32,
+                    result->capabilities, CHPP_GNSS_DEFAULT_CAPABILITIES);
 #endif
 
     clientContext->capabilities = result->capabilities;
@@ -414,11 +414,11 @@ static void chppGnssControlLocationSessionResult(
     // Short response length indicates an error
 
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE("ControlLocation failed at service err=%" PRIu8, rxHeader->error);
     if (rxHeader->error == CHPP_APP_ERROR_NONE) {
-      // But no error reported
-      CHPP_PROD_ASSERT(false);
+      CHPP_LOGE("Missing err");
     } else {
-      CHPP_LOGE("ControlLocation failed at service: %" PRIu8, rxHeader->error);
+      // TODO (b/182309999): Remove else and always call
       gCallbacks->locationStatusChangeCallback(false, CHRE_ERROR);
     }
 
@@ -427,9 +427,9 @@ static void chppGnssControlLocationSessionResult(
         (struct ChppGnssControlLocationSessionResponse *)buf;
 
     CHPP_LOGD(
-        "chppGnssControlLocationSessionResult received enable=%s, "
+        "chppGnssControlLocationSessionResult received enable=%d, "
         "errorCode=%" PRIu8,
-        result->enabled ? "true" : "false", result->errorCode);
+        result->enabled, result->errorCode);
 
     gCallbacks->locationStatusChangeCallback(result->enabled,
                                              result->errorCode);
@@ -454,11 +454,11 @@ static void chppGnssControlMeasurementSessionResult(
     // Short response length indicates an error
 
     struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
+    CHPP_LOGE("Measurement failed at service err=%" PRIu8, rxHeader->error);
     if (rxHeader->error == CHPP_APP_ERROR_NONE) {
-      // But no error reported
-      CHPP_PROD_ASSERT(false);
+      CHPP_LOGE("Missing err");
     } else {
-      CHPP_LOGE("Measurement failed at service err=%" PRIu8, rxHeader->error);
+      // TODO (b/182309999): Remove else and always call
       gCallbacks->measurementStatusChangeCallback(false, CHRE_ERROR);
     }
 
@@ -467,9 +467,9 @@ static void chppGnssControlMeasurementSessionResult(
         (struct ChppGnssControlMeasurementSessionResponse *)buf;
 
     CHPP_LOGD(
-        "chppGnssControlMeasurementSessionResult received enable=%s, "
+        "chppGnssControlMeasurementSessionResult received enable=%d, "
         "errorCode=%" PRIu8,
-        result->enabled ? "true" : "false", result->errorCode);
+        result->enabled, result->errorCode);
 
     gCallbacks->measurementStatusChangeCallback(result->enabled,
                                                 result->errorCode);
@@ -494,7 +494,7 @@ static void chppGnssConfigurePassiveLocationListenerResult(
   struct ChppAppHeader *rxHeader = (struct ChppAppHeader *)buf;
 
   if (rxHeader->error != CHPP_APP_ERROR_NONE) {
-    CHPP_LOGE("Passive scan failed at service %" PRIu8, rxHeader->error);
+    CHPP_LOGE("Passive scan failed at service err=%" PRIu8, rxHeader->error);
     CHPP_DEBUG_ASSERT(false);
 
   } else {
