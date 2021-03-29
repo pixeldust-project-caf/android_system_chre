@@ -69,6 +69,12 @@ struct SettingChangeMessageBuilder;
 struct LogMessageV2;
 struct LogMessageV2Builder;
 
+struct SelfTestRequest;
+struct SelfTestRequestBuilder;
+
+struct SelfTestResponse;
+struct SelfTestResponseBuilder;
+
 struct HostAddress;
 
 struct MessageContainer;
@@ -79,9 +85,9 @@ enum class Setting : int8_t {
   LOCATION = 0,
   WIFI_AVAILABLE = 1,
   AIRPLANE_MODE = 2,
-  GLOBAL_MIC_DISABLE = 3,
+  MICROPHONE = 3,
   MIN = LOCATION,
-  MAX = GLOBAL_MIC_DISABLE
+  MAX = MICROPHONE
 };
 
 inline const Setting (&EnumValuesSetting())[4] {
@@ -89,7 +95,7 @@ inline const Setting (&EnumValuesSetting())[4] {
     Setting::LOCATION,
     Setting::WIFI_AVAILABLE,
     Setting::AIRPLANE_MODE,
-    Setting::GLOBAL_MIC_DISABLE
+    Setting::MICROPHONE
   };
   return values;
 }
@@ -99,14 +105,14 @@ inline const char * const *EnumNamesSetting() {
     "LOCATION",
     "WIFI_AVAILABLE",
     "AIRPLANE_MODE",
-    "GLOBAL_MIC_DISABLE",
+    "MICROPHONE",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameSetting(Setting e) {
-  if (flatbuffers::IsOutRange(e, Setting::LOCATION, Setting::GLOBAL_MIC_DISABLE)) return "";
+  if (flatbuffers::IsOutRange(e, Setting::LOCATION, Setting::MICROPHONE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesSetting()[index];
 }
@@ -165,11 +171,13 @@ enum class ChreMessage : uint8_t {
   LowPowerMicAccessRelease = 17,
   SettingChangeMessage = 18,
   LogMessageV2 = 19,
+  SelfTestRequest = 20,
+  SelfTestResponse = 21,
   MIN = NONE,
-  MAX = LogMessageV2
+  MAX = SelfTestResponse
 };
 
-inline const ChreMessage (&EnumValuesChreMessage())[20] {
+inline const ChreMessage (&EnumValuesChreMessage())[22] {
   static const ChreMessage values[] = {
     ChreMessage::NONE,
     ChreMessage::NanoappMessage,
@@ -190,13 +198,15 @@ inline const ChreMessage (&EnumValuesChreMessage())[20] {
     ChreMessage::LowPowerMicAccessRequest,
     ChreMessage::LowPowerMicAccessRelease,
     ChreMessage::SettingChangeMessage,
-    ChreMessage::LogMessageV2
+    ChreMessage::LogMessageV2,
+    ChreMessage::SelfTestRequest,
+    ChreMessage::SelfTestResponse
   };
   return values;
 }
 
 inline const char * const *EnumNamesChreMessage() {
-  static const char * const names[21] = {
+  static const char * const names[23] = {
     "NONE",
     "NanoappMessage",
     "HubInfoRequest",
@@ -217,13 +227,15 @@ inline const char * const *EnumNamesChreMessage() {
     "LowPowerMicAccessRelease",
     "SettingChangeMessage",
     "LogMessageV2",
+    "SelfTestRequest",
+    "SelfTestResponse",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameChreMessage(ChreMessage e) {
-  if (flatbuffers::IsOutRange(e, ChreMessage::NONE, ChreMessage::LogMessageV2)) return "";
+  if (flatbuffers::IsOutRange(e, ChreMessage::NONE, ChreMessage::SelfTestResponse)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesChreMessage()[index];
 }
@@ -306,6 +318,14 @@ template<> struct ChreMessageTraits<chre::fbs::SettingChangeMessage> {
 
 template<> struct ChreMessageTraits<chre::fbs::LogMessageV2> {
   static const ChreMessage enum_value = ChreMessage::LogMessageV2;
+};
+
+template<> struct ChreMessageTraits<chre::fbs::SelfTestRequest> {
+  static const ChreMessage enum_value = ChreMessage::SelfTestRequest;
+};
+
+template<> struct ChreMessageTraits<chre::fbs::SelfTestResponse> {
+  static const ChreMessage enum_value = ChreMessage::SelfTestResponse;
 };
 
 bool VerifyChreMessage(flatbuffers::Verifier &verifier, const void *obj, ChreMessage type);
@@ -1733,6 +1753,78 @@ inline flatbuffers::Offset<LogMessageV2> CreateLogMessageV2Direct(
       num_logs_dropped);
 }
 
+struct SelfTestRequest FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef SelfTestRequestBuilder Builder;
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           verifier.EndTable();
+  }
+};
+
+struct SelfTestRequestBuilder {
+  typedef SelfTestRequest Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  explicit SelfTestRequestBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  SelfTestRequestBuilder &operator=(const SelfTestRequestBuilder &);
+  flatbuffers::Offset<SelfTestRequest> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<SelfTestRequest>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<SelfTestRequest> CreateSelfTestRequest(
+    flatbuffers::FlatBufferBuilder &_fbb) {
+  SelfTestRequestBuilder builder_(_fbb);
+  return builder_.Finish();
+}
+
+struct SelfTestResponse FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef SelfTestResponseBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_SUCCESS = 4
+  };
+  bool success() const {
+    return GetField<uint8_t>(VT_SUCCESS, 0) != 0;
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_SUCCESS) &&
+           verifier.EndTable();
+  }
+};
+
+struct SelfTestResponseBuilder {
+  typedef SelfTestResponse Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_success(bool success) {
+    fbb_.AddElement<uint8_t>(SelfTestResponse::VT_SUCCESS, static_cast<uint8_t>(success), 0);
+  }
+  explicit SelfTestResponseBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  SelfTestResponseBuilder &operator=(const SelfTestResponseBuilder &);
+  flatbuffers::Offset<SelfTestResponse> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<SelfTestResponse>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<SelfTestResponse> CreateSelfTestResponse(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    bool success = false) {
+  SelfTestResponseBuilder builder_(_fbb);
+  builder_.add_success(success);
+  return builder_.Finish();
+}
+
 /// The top-level container that encapsulates all possible messages. Note that
 /// per FlatBuffers requirements, we can't use a union as the top-level
 /// structure (root type), so we must wrap it in a table.
@@ -1806,6 +1898,12 @@ struct MessageContainer FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   const chre::fbs::LogMessageV2 *message_as_LogMessageV2() const {
     return message_type() == chre::fbs::ChreMessage::LogMessageV2 ? static_cast<const chre::fbs::LogMessageV2 *>(message()) : nullptr;
+  }
+  const chre::fbs::SelfTestRequest *message_as_SelfTestRequest() const {
+    return message_type() == chre::fbs::ChreMessage::SelfTestRequest ? static_cast<const chre::fbs::SelfTestRequest *>(message()) : nullptr;
+  }
+  const chre::fbs::SelfTestResponse *message_as_SelfTestResponse() const {
+    return message_type() == chre::fbs::ChreMessage::SelfTestResponse ? static_cast<const chre::fbs::SelfTestResponse *>(message()) : nullptr;
   }
   /// The originating or destination client ID on the host side, used to direct
   /// responses only to the client that sent the request. Although initially
@@ -1900,6 +1998,14 @@ template<> inline const chre::fbs::SettingChangeMessage *MessageContainer::messa
 
 template<> inline const chre::fbs::LogMessageV2 *MessageContainer::message_as<chre::fbs::LogMessageV2>() const {
   return message_as_LogMessageV2();
+}
+
+template<> inline const chre::fbs::SelfTestRequest *MessageContainer::message_as<chre::fbs::SelfTestRequest>() const {
+  return message_as_SelfTestRequest();
+}
+
+template<> inline const chre::fbs::SelfTestResponse *MessageContainer::message_as<chre::fbs::SelfTestResponse>() const {
+  return message_as_SelfTestResponse();
 }
 
 struct MessageContainerBuilder {
@@ -2020,6 +2126,14 @@ inline bool VerifyChreMessage(flatbuffers::Verifier &verifier, const void *obj, 
     }
     case ChreMessage::LogMessageV2: {
       auto ptr = reinterpret_cast<const chre::fbs::LogMessageV2 *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case ChreMessage::SelfTestRequest: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestRequest *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case ChreMessage::SelfTestResponse: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestResponse *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;

@@ -26,6 +26,7 @@
 #include <sys/types.h>
 
 #include <fstream>
+#include <future>
 #include <sstream>
 #include <thread>
 
@@ -40,7 +41,7 @@
  * Usage:
  *  chre_test_client load <nanoapp-id> <nanoapp-so-path> \
  *      [app-version] [api-version] [tcm-capable] [nanoapp-header-path]
- *  chre_test_client load_with_header <nanoapp-so-path> <nanoapp-header-path>
+ *  chre_test_client load_with_header <nanoapp-header-path> <nanoapp-so-path>
  *  chre_test_client unload <nanoapp-id>
  */
 
@@ -133,6 +134,18 @@ class SocketCallbacks : public SocketClient::ICallbacks,
     LOGI("Got unload nanoapp response, transaction ID 0x%" PRIx32 " result %d",
          response.transaction_id, response.success);
   }
+
+  void handleSelfTestResponse(const ::chre::fbs::SelfTestResponseT &response) {
+    LOGI("Got self test response with success %d", response.success);
+    mResultPromise.set_value(response.success);
+  }
+
+  std::future<bool> getResultFuture() {
+    return mResultPromise.get_future();
+  }
+
+ private:
+  std::promise<bool> mResultPromise;
 };
 
 void requestHubInfo(SocketClient &client) {
@@ -261,6 +274,16 @@ void sendUnloadNanoappRequest(SocketClient &client, uint64_t appId) {
   }
 }
 
+void sendSelfTestRequest(SocketClient &client) {
+  FlatBufferBuilder builder(48);
+  HostProtocolHost::encodeSelfTestRequest(builder);
+
+  LOGI("Sending self test");
+  if (!client.sendMessage(builder.GetBufferPointer(), builder.GetSize())) {
+    LOGE("Failed to send message");
+  }
+}
+
 }  // anonymous namespace
 
 static void usage(const std::string &name) {
@@ -271,8 +294,8 @@ static void usage(const std::string &name) {
       "Usage:\n  " +
       name +
       " load <nanoapp-id> <nanoapp-so-path> [app-version] [api-version]\n  " +
-      name + " load_with_header <nanoapp-so-path> <nanoapp-header-path>\n  " +
-      name + " unload <nanoapp-id>\n";
+      name + " load_with_header <nanoapp-header-path> <nanoapp-so-path>\n  " +
+      name + " unload <nanoapp-id>\n " + name + " self_test\n";
 
   LOGI("%s", output.c_str());
 }
@@ -285,12 +308,11 @@ int main(int argc, char *argv[]) {
   SocketClient client;
   sp<SocketCallbacks> callbacks = new SocketCallbacks();
 
+  bool success = true;
   if (!client.connect("chre", callbacks)) {
     LOGE("Couldn't connect to socket");
-    return -1;
-  }
-
-  if (cmd.empty()) {
+    success = false;
+  } else if (cmd.empty()) {
     requestHubInfo(client);
     requestNanoappList(client);
     sendMessageToNanoapp(client);
@@ -309,10 +331,10 @@ int main(int argc, char *argv[]) {
     if (headerPath.empty() || binaryPath.empty()) {
       LOGE("Arguments not provided!");
       usage(name);
-      return -1;
+      success = false;
+    } else {
+      sendLoadNanoappRequest(client, headerPath.c_str(), binaryPath.c_str());
     }
-
-    sendLoadNanoappRequest(client, headerPath.c_str(), binaryPath.c_str());
   } else if (cmd == "load") {
     const std::string idstr{argi < argc ? argv[argi++] : ""};
     const std::string path{argi < argc ? argv[argi++] : ""};
@@ -328,20 +350,21 @@ int main(int argc, char *argv[]) {
     if (idstr.empty() || path.empty()) {
       LOGE("Arguments not provided!");
       usage(name);
-      return -1;
+      success = false;
+    } else {
+      std::istringstream(idstr) >> std::setbase(0) >> id;
+      if (!appVerStr.empty()) {
+        std::istringstream(appVerStr) >> std::setbase(0) >> appVersion;
+      }
+      if (!apiVerStr.empty()) {
+        std::istringstream(apiVerStr) >> std::setbase(0) >> apiVersion;
+      }
+      if (!tcmCapStr.empty()) {
+        std::istringstream(tcmCapStr) >> tcmApp;
+      }
+      sendLoadNanoappRequest(client, path.c_str(), id, appVersion, apiVersion,
+                             tcmApp);
     }
-    std::istringstream(idstr) >> std::setbase(0) >> id;
-    if (!appVerStr.empty()) {
-      std::istringstream(appVerStr) >> std::setbase(0) >> appVersion;
-    }
-    if (!apiVerStr.empty()) {
-      std::istringstream(apiVerStr) >> std::setbase(0) >> apiVersion;
-    }
-    if (!tcmCapStr.empty()) {
-      std::istringstream(tcmCapStr) >> tcmApp;
-    }
-    sendLoadNanoappRequest(client, path.c_str(), id, appVersion, apiVersion,
-                           tcmApp);
   } else if (cmd == "unload") {
     const std::string idstr{argi < argc ? argv[argi++] : ""};
     uint64_t id = 0;
@@ -349,15 +372,26 @@ int main(int argc, char *argv[]) {
     if (idstr.empty()) {
       LOGE("Arguments not provided!");
       usage(name);
-      return -1;
+      success = false;
+    } else {
+      std::istringstream(idstr) >> std::setbase(0) >> id;
+      sendUnloadNanoappRequest(client, id);
     }
-    std::istringstream(idstr) >> std::setbase(0) >> id;
-    sendUnloadNanoappRequest(client, id);
+  } else if (cmd == "self_test") {
+    sendSelfTestRequest(client);
+
+    std::future<bool> future = callbacks->getResultFuture();
+    std::future_status status = future.wait_for(std::chrono::seconds(5));
+
+    if (status != std::future_status::ready) {
+      LOGE("Self test timed out");
+    } else {
+      success = future.get();
+    }
   } else {
     LOGE("Invalid command provided!");
     usage(name);
-    return -1;
   }
 
-  return 0;
+  return success ? 0 : -1;
 }

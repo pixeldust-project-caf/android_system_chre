@@ -84,6 +84,7 @@ enum class PendingMessageType {
   LowPowerMicAccessRequest,
   LowPowerMicAccessRelease,
   EncodedLogMessage,
+  SelfTestResponse,
 };
 
 struct PendingMessage {
@@ -281,7 +282,7 @@ int generateMessageToHost(const MessageToHost *msgToHost, unsigned char *buffer,
   HostProtocolChre::encodeNanoappMessage(
       builder, msgToHost->appId, msgToHost->toHostData.messageType,
       msgToHost->toHostData.hostEndpoint, msgToHost->message.data(),
-      msgToHost->message.size(), msgToHost->permissions,
+      msgToHost->message.size(), msgToHost->toHostData.appPermissions,
       msgToHost->toHostData.messagePermissions);
 
   int result = copyToHostBuffer(builder, buffer, bufferSize, messageLen);
@@ -385,6 +386,26 @@ void sendDebugDumpResponse(uint16_t hostClientId, bool success,
   data.success = success;
   data.dataCount = dataCount;
   buildAndEnqueueMessage(PendingMessageType::DebugDumpResponse, kInitialSize,
+                         msgBuilder, &data);
+}
+
+void sendSelfTestResponse(uint16_t hostClientId, bool success) {
+  struct SelfTestResponseData {
+    uint16_t hostClientId;
+    bool success;
+  };
+
+  auto msgBuilder = [](ChreFlatBufferBuilder &builder, void *cookie) {
+    const auto *data = static_cast<const SelfTestResponseData *>(cookie);
+    HostProtocolChre::encodeSelfTestResponse(builder, data->hostClientId,
+                                             data->success);
+  };
+
+  constexpr size_t kInitialSize = 52;
+  SelfTestResponseData data;
+  data.hostClientId = hostClientId;
+  data.success = success;
+  buildAndEnqueueMessage(PendingMessageType::SelfTestResponse, kInitialSize,
                          msgBuilder, &data);
 }
 
@@ -600,6 +621,7 @@ extern "C" int chre_slpi_get_message_to_host(unsigned char *buffer,
       case PendingMessageType::LowPowerMicAccessRequest:
       case PendingMessageType::LowPowerMicAccessRelease:
       case PendingMessageType::EncodedLogMessage:
+      case PendingMessageType::SelfTestResponse:
         result = generateMessageFromBuilder(
             pendingMsg.data.builder, buffer, bufferSize, messageLen,
             pendingMsg.type == PendingMessageType::EncodedLogMessage);
@@ -923,6 +945,12 @@ void HostMessageHandlers::handleSettingChangeMessage(fbs::Setting setting,
       HostProtocolChre::getSettingStateFromFbs(state, &chreSettingState)) {
     postSettingChange(chreSetting, chreSettingState);
   }
+}
+
+void HostMessageHandlers::handleSelfTestRequest(uint16_t hostClientId) {
+  // TODO(b/182201569): Run test
+  bool success = true;
+  sendSelfTestResponse(hostClientId, success);
 }
 
 }  // namespace chre

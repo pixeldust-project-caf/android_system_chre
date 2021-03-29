@@ -74,12 +74,6 @@ Return<Result> GenericContextHubV1_2::registerCallback_1_2(
   return registerCallbackCommon(hubId, wrappedCallback);
 }
 
-Return<Result> GenericContextHubV1_2::sendMessageToHub_1_2(
-    uint32_t hubId, const ContextHubMsg &msg) {
-  // Other V1.2 fields are only used from nanoapp -> host messages.
-  return sendMessageToHub(hubId, msg.msg_1_0);
-}
-
 Return<void> GenericContextHubV1_2::onSettingChanged(V1_1::Setting setting,
                                                      SettingValue newValue) {
   return onSettingChanged_1_2(reinterpret_cast<V1_2::Setting &>(setting),
@@ -92,6 +86,14 @@ Return<void> GenericContextHubV1_2::onSettingChanged_1_2(
   fbs::SettingState fbsState;
   if (getFbsSetting(setting, &fbsSetting) &&
       getFbsSettingValue(newValue, &fbsState)) {
+    if (fbsSetting == fbs::Setting::MICROPHONE) {
+      // TODO(b/183026207): The microphone state was flipped in the HAL,
+      // and we flip it back here temporarily, until the settings changed
+      // notifications are implemented.
+      fbsState = (fbsState == fbs::SettingState::ENABLED)
+                     ? fbs::SettingState::DISABLED
+                     : fbs::SettingState::ENABLED;
+    }
     FlatBufferBuilder builder(64);
     HostProtocolHost::encodeSettingChangeNotification(builder, fbsSetting,
                                                       fbsState);

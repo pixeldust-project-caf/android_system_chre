@@ -89,6 +89,14 @@ struct LogMessageV2;
 struct LogMessageV2Builder;
 struct LogMessageV2T;
 
+struct SelfTestRequest;
+struct SelfTestRequestBuilder;
+struct SelfTestRequestT;
+
+struct SelfTestResponse;
+struct SelfTestResponseBuilder;
+struct SelfTestResponseT;
+
 struct HostAddress;
 
 struct MessageContainer;
@@ -100,9 +108,9 @@ enum class Setting : int8_t {
   LOCATION = 0,
   WIFI_AVAILABLE = 1,
   AIRPLANE_MODE = 2,
-  GLOBAL_MIC_DISABLE = 3,
+  MICROPHONE = 3,
   MIN = LOCATION,
-  MAX = GLOBAL_MIC_DISABLE
+  MAX = MICROPHONE
 };
 
 inline const Setting (&EnumValuesSetting())[4] {
@@ -110,7 +118,7 @@ inline const Setting (&EnumValuesSetting())[4] {
     Setting::LOCATION,
     Setting::WIFI_AVAILABLE,
     Setting::AIRPLANE_MODE,
-    Setting::GLOBAL_MIC_DISABLE
+    Setting::MICROPHONE
   };
   return values;
 }
@@ -120,14 +128,14 @@ inline const char * const *EnumNamesSetting() {
     "LOCATION",
     "WIFI_AVAILABLE",
     "AIRPLANE_MODE",
-    "GLOBAL_MIC_DISABLE",
+    "MICROPHONE",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameSetting(Setting e) {
-  if (flatbuffers::IsOutRange(e, Setting::LOCATION, Setting::GLOBAL_MIC_DISABLE)) return "";
+  if (flatbuffers::IsOutRange(e, Setting::LOCATION, Setting::MICROPHONE)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesSetting()[index];
 }
@@ -186,11 +194,13 @@ enum class ChreMessage : uint8_t {
   LowPowerMicAccessRelease = 17,
   SettingChangeMessage = 18,
   LogMessageV2 = 19,
+  SelfTestRequest = 20,
+  SelfTestResponse = 21,
   MIN = NONE,
-  MAX = LogMessageV2
+  MAX = SelfTestResponse
 };
 
-inline const ChreMessage (&EnumValuesChreMessage())[20] {
+inline const ChreMessage (&EnumValuesChreMessage())[22] {
   static const ChreMessage values[] = {
     ChreMessage::NONE,
     ChreMessage::NanoappMessage,
@@ -211,13 +221,15 @@ inline const ChreMessage (&EnumValuesChreMessage())[20] {
     ChreMessage::LowPowerMicAccessRequest,
     ChreMessage::LowPowerMicAccessRelease,
     ChreMessage::SettingChangeMessage,
-    ChreMessage::LogMessageV2
+    ChreMessage::LogMessageV2,
+    ChreMessage::SelfTestRequest,
+    ChreMessage::SelfTestResponse
   };
   return values;
 }
 
 inline const char * const *EnumNamesChreMessage() {
-  static const char * const names[21] = {
+  static const char * const names[23] = {
     "NONE",
     "NanoappMessage",
     "HubInfoRequest",
@@ -238,13 +250,15 @@ inline const char * const *EnumNamesChreMessage() {
     "LowPowerMicAccessRelease",
     "SettingChangeMessage",
     "LogMessageV2",
+    "SelfTestRequest",
+    "SelfTestResponse",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameChreMessage(ChreMessage e) {
-  if (flatbuffers::IsOutRange(e, ChreMessage::NONE, ChreMessage::LogMessageV2)) return "";
+  if (flatbuffers::IsOutRange(e, ChreMessage::NONE, ChreMessage::SelfTestResponse)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesChreMessage()[index];
 }
@@ -327,6 +341,14 @@ template<> struct ChreMessageTraits<chre::fbs::SettingChangeMessage> {
 
 template<> struct ChreMessageTraits<chre::fbs::LogMessageV2> {
   static const ChreMessage enum_value = ChreMessage::LogMessageV2;
+};
+
+template<> struct ChreMessageTraits<chre::fbs::SelfTestRequest> {
+  static const ChreMessage enum_value = ChreMessage::SelfTestRequest;
+};
+
+template<> struct ChreMessageTraits<chre::fbs::SelfTestResponse> {
+  static const ChreMessage enum_value = ChreMessage::SelfTestResponse;
 };
 
 struct ChreMessageUnion {
@@ -512,6 +534,22 @@ struct ChreMessageUnion {
   const chre::fbs::LogMessageV2T *AsLogMessageV2() const {
     return type == ChreMessage::LogMessageV2 ?
       reinterpret_cast<const chre::fbs::LogMessageV2T *>(value) : nullptr;
+  }
+  chre::fbs::SelfTestRequestT *AsSelfTestRequest() {
+    return type == ChreMessage::SelfTestRequest ?
+      reinterpret_cast<chre::fbs::SelfTestRequestT *>(value) : nullptr;
+  }
+  const chre::fbs::SelfTestRequestT *AsSelfTestRequest() const {
+    return type == ChreMessage::SelfTestRequest ?
+      reinterpret_cast<const chre::fbs::SelfTestRequestT *>(value) : nullptr;
+  }
+  chre::fbs::SelfTestResponseT *AsSelfTestResponse() {
+    return type == ChreMessage::SelfTestResponse ?
+      reinterpret_cast<chre::fbs::SelfTestResponseT *>(value) : nullptr;
+  }
+  const chre::fbs::SelfTestResponseT *AsSelfTestResponse() const {
+    return type == ChreMessage::SelfTestResponse ?
+      reinterpret_cast<const chre::fbs::SelfTestResponseT *>(value) : nullptr;
   }
 };
 
@@ -2428,6 +2466,107 @@ inline flatbuffers::Offset<LogMessageV2> CreateLogMessageV2Direct(
 
 flatbuffers::Offset<LogMessageV2> CreateLogMessageV2(flatbuffers::FlatBufferBuilder &_fbb, const LogMessageV2T *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
+struct SelfTestRequestT : public flatbuffers::NativeTable {
+  typedef SelfTestRequest TableType;
+  SelfTestRequestT() {
+  }
+};
+
+struct SelfTestRequest FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef SelfTestRequestT NativeTableType;
+  typedef SelfTestRequestBuilder Builder;
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           verifier.EndTable();
+  }
+  SelfTestRequestT *UnPack(const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(SelfTestRequestT *_o, const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static flatbuffers::Offset<SelfTestRequest> Pack(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestRequestT* _o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct SelfTestRequestBuilder {
+  typedef SelfTestRequest Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  explicit SelfTestRequestBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  SelfTestRequestBuilder &operator=(const SelfTestRequestBuilder &);
+  flatbuffers::Offset<SelfTestRequest> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<SelfTestRequest>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<SelfTestRequest> CreateSelfTestRequest(
+    flatbuffers::FlatBufferBuilder &_fbb) {
+  SelfTestRequestBuilder builder_(_fbb);
+  return builder_.Finish();
+}
+
+flatbuffers::Offset<SelfTestRequest> CreateSelfTestRequest(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestRequestT *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct SelfTestResponseT : public flatbuffers::NativeTable {
+  typedef SelfTestResponse TableType;
+  bool success;
+  SelfTestResponseT()
+      : success(false) {
+  }
+};
+
+struct SelfTestResponse FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef SelfTestResponseT NativeTableType;
+  typedef SelfTestResponseBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_SUCCESS = 4
+  };
+  bool success() const {
+    return GetField<uint8_t>(VT_SUCCESS, 0) != 0;
+  }
+  bool mutate_success(bool _success) {
+    return SetField<uint8_t>(VT_SUCCESS, static_cast<uint8_t>(_success), 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_SUCCESS) &&
+           verifier.EndTable();
+  }
+  SelfTestResponseT *UnPack(const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(SelfTestResponseT *_o, const flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static flatbuffers::Offset<SelfTestResponse> Pack(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestResponseT* _o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct SelfTestResponseBuilder {
+  typedef SelfTestResponse Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_success(bool success) {
+    fbb_.AddElement<uint8_t>(SelfTestResponse::VT_SUCCESS, static_cast<uint8_t>(success), 0);
+  }
+  explicit SelfTestResponseBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  SelfTestResponseBuilder &operator=(const SelfTestResponseBuilder &);
+  flatbuffers::Offset<SelfTestResponse> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<SelfTestResponse>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<SelfTestResponse> CreateSelfTestResponse(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    bool success = false) {
+  SelfTestResponseBuilder builder_(_fbb);
+  builder_.add_success(success);
+  return builder_.Finish();
+}
+
+flatbuffers::Offset<SelfTestResponse> CreateSelfTestResponse(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestResponseT *_o, const flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
 struct MessageContainerT : public flatbuffers::NativeTable {
   typedef MessageContainer TableType;
   chre::fbs::ChreMessageUnion message;
@@ -2510,6 +2649,12 @@ struct MessageContainer FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   const chre::fbs::LogMessageV2 *message_as_LogMessageV2() const {
     return message_type() == chre::fbs::ChreMessage::LogMessageV2 ? static_cast<const chre::fbs::LogMessageV2 *>(message()) : nullptr;
+  }
+  const chre::fbs::SelfTestRequest *message_as_SelfTestRequest() const {
+    return message_type() == chre::fbs::ChreMessage::SelfTestRequest ? static_cast<const chre::fbs::SelfTestRequest *>(message()) : nullptr;
+  }
+  const chre::fbs::SelfTestResponse *message_as_SelfTestResponse() const {
+    return message_type() == chre::fbs::ChreMessage::SelfTestResponse ? static_cast<const chre::fbs::SelfTestResponse *>(message()) : nullptr;
   }
   void *mutable_message() {
     return GetPointer<void *>(VT_MESSAGE);
@@ -2613,6 +2758,14 @@ template<> inline const chre::fbs::SettingChangeMessage *MessageContainer::messa
 
 template<> inline const chre::fbs::LogMessageV2 *MessageContainer::message_as<chre::fbs::LogMessageV2>() const {
   return message_as_LogMessageV2();
+}
+
+template<> inline const chre::fbs::SelfTestRequest *MessageContainer::message_as<chre::fbs::SelfTestRequest>() const {
+  return message_as_SelfTestRequest();
+}
+
+template<> inline const chre::fbs::SelfTestResponse *MessageContainer::message_as<chre::fbs::SelfTestResponse>() const {
+  return message_as_SelfTestResponse();
 }
 
 struct MessageContainerBuilder {
@@ -3269,6 +3422,55 @@ inline flatbuffers::Offset<LogMessageV2> CreateLogMessageV2(flatbuffers::FlatBuf
       _num_logs_dropped);
 }
 
+inline SelfTestRequestT *SelfTestRequest::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
+  std::unique_ptr<chre::fbs::SelfTestRequestT> _o = std::unique_ptr<chre::fbs::SelfTestRequestT>(new SelfTestRequestT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void SelfTestRequest::UnPackTo(SelfTestRequestT *_o, const flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+}
+
+inline flatbuffers::Offset<SelfTestRequest> SelfTestRequest::Pack(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestRequestT* _o, const flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateSelfTestRequest(_fbb, _o, _rehasher);
+}
+
+inline flatbuffers::Offset<SelfTestRequest> CreateSelfTestRequest(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestRequestT *_o, const flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { flatbuffers::FlatBufferBuilder *__fbb; const SelfTestRequestT* __o; const flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  return chre::fbs::CreateSelfTestRequest(
+      _fbb);
+}
+
+inline SelfTestResponseT *SelfTestResponse::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
+  std::unique_ptr<chre::fbs::SelfTestResponseT> _o = std::unique_ptr<chre::fbs::SelfTestResponseT>(new SelfTestResponseT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void SelfTestResponse::UnPackTo(SelfTestResponseT *_o, const flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = success(); _o->success = _e; }
+}
+
+inline flatbuffers::Offset<SelfTestResponse> SelfTestResponse::Pack(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestResponseT* _o, const flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateSelfTestResponse(_fbb, _o, _rehasher);
+}
+
+inline flatbuffers::Offset<SelfTestResponse> CreateSelfTestResponse(flatbuffers::FlatBufferBuilder &_fbb, const SelfTestResponseT *_o, const flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { flatbuffers::FlatBufferBuilder *__fbb; const SelfTestResponseT* __o; const flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _success = _o->success;
+  return chre::fbs::CreateSelfTestResponse(
+      _fbb,
+      _success);
+}
+
 inline MessageContainerT *MessageContainer::UnPack(const flatbuffers::resolver_function_t *_resolver) const {
   std::unique_ptr<chre::fbs::MessageContainerT> _o = std::unique_ptr<chre::fbs::MessageContainerT>(new MessageContainerT());
   UnPackTo(_o.get(), _resolver);
@@ -3382,6 +3584,14 @@ inline bool VerifyChreMessage(flatbuffers::Verifier &verifier, const void *obj, 
       auto ptr = reinterpret_cast<const chre::fbs::LogMessageV2 *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case ChreMessage::SelfTestRequest: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestRequest *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case ChreMessage::SelfTestResponse: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestResponse *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -3476,6 +3686,14 @@ inline void *ChreMessageUnion::UnPack(const void *obj, ChreMessage type, const f
       auto ptr = reinterpret_cast<const chre::fbs::LogMessageV2 *>(obj);
       return ptr->UnPack(resolver);
     }
+    case ChreMessage::SelfTestRequest: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestRequest *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case ChreMessage::SelfTestResponse: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestResponse *>(obj);
+      return ptr->UnPack(resolver);
+    }
     default: return nullptr;
   }
 }
@@ -3558,6 +3776,14 @@ inline flatbuffers::Offset<void> ChreMessageUnion::Pack(flatbuffers::FlatBufferB
       auto ptr = reinterpret_cast<const chre::fbs::LogMessageV2T *>(value);
       return CreateLogMessageV2(_fbb, ptr, _rehasher).Union();
     }
+    case ChreMessage::SelfTestRequest: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestRequestT *>(value);
+      return CreateSelfTestRequest(_fbb, ptr, _rehasher).Union();
+    }
+    case ChreMessage::SelfTestResponse: {
+      auto ptr = reinterpret_cast<const chre::fbs::SelfTestResponseT *>(value);
+      return CreateSelfTestResponse(_fbb, ptr, _rehasher).Union();
+    }
     default: return 0;
   }
 }
@@ -3638,6 +3864,14 @@ inline ChreMessageUnion::ChreMessageUnion(const ChreMessageUnion &u) : type(u.ty
     }
     case ChreMessage::LogMessageV2: {
       value = new chre::fbs::LogMessageV2T(*reinterpret_cast<chre::fbs::LogMessageV2T *>(u.value));
+      break;
+    }
+    case ChreMessage::SelfTestRequest: {
+      value = new chre::fbs::SelfTestRequestT(*reinterpret_cast<chre::fbs::SelfTestRequestT *>(u.value));
+      break;
+    }
+    case ChreMessage::SelfTestResponse: {
+      value = new chre::fbs::SelfTestResponseT(*reinterpret_cast<chre::fbs::SelfTestResponseT *>(u.value));
       break;
     }
     default:
@@ -3739,6 +3973,16 @@ inline void ChreMessageUnion::Reset() {
     }
     case ChreMessage::LogMessageV2: {
       auto ptr = reinterpret_cast<chre::fbs::LogMessageV2T *>(value);
+      delete ptr;
+      break;
+    }
+    case ChreMessage::SelfTestRequest: {
+      auto ptr = reinterpret_cast<chre::fbs::SelfTestRequestT *>(value);
+      delete ptr;
+      break;
+    }
+    case ChreMessage::SelfTestResponse: {
+      auto ptr = reinterpret_cast<chre::fbs::SelfTestResponseT *>(value);
       delete ptr;
       break;
     }

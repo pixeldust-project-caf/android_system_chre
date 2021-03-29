@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The Android Open Source Project
+ * Copyright (C) 2021 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,17 +14,27 @@
  * limitations under the License.
  */
 
-#ifndef CHRE_POWER_TEST_COMMON_H_
-#define CHRE_POWER_TEST_COMMON_H_
+#ifndef CHPP_PLATFORM_UTILS_H_
+#define CHPP_PLATFORM_UTILS_H_
 
-#ifndef CHRE_NANOAPP_INTERNAL
-#include "chre/util/nanoapp/log.h"
-#endif  // CHRE_NANOAPP_INTERNAL
+#include <stddef.h>
 
-#ifdef CHRE_TCM_BUILD
-#define LOG_TAG "[PowerTest_TCM]"
-#else  // CHRE_TCM_BUILD
-#define LOG_TAG "[PowerTest]"
-#endif  // CHRE_TCM_BUILD
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#endif  // CHRE_POWER_TEST_COMMON_H_
+/**
+ * Clears the amount of memory allocation tracked by chppGetTotalAllocBytes().
+ */
+void chppClearTotalAllocBytes(void);
+
+/**
+ * @return The total amount of memory allocated by CHPP.
+ */
+size_t chppGetTotalAllocBytes(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // CHPP_PLATFORM_UTILS_H_

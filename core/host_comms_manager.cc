@@ -21,6 +21,7 @@
 #include "chre/core/host_comms_manager.h"
 #include "chre/platform/assert.h"
 #include "chre/platform/host_link.h"
+#include "chre/util/macros.h"
 
 namespace chre {
 
@@ -36,6 +37,10 @@ bool HostCommsManager::sendMessageToHostFromNanoapp(
          CHRE_MESSAGE_TO_HOST_MAX_SIZE);
   } else if (hostEndpoint == kHostEndpointUnspecified) {
     LOGW("Rejecting message to invalid host endpoint");
+  } else if (!BITMASK_HAS_VALUE(nanoapp->getAppPermissions(),
+                                messagePermissions)) {
+    LOGE("Message perms %" PRIx32 " not subset of napp perms %" PRIx32,
+         messagePermissions, nanoapp->getAppPermissions());
   } else {
     MessageToHost *msgToHost = mMessagePool.allocate();
 
@@ -47,7 +52,7 @@ bool HostCommsManager::sendMessageToHostFromNanoapp(
       msgToHost->toHostData.hostEndpoint = hostEndpoint;
       msgToHost->toHostData.messageType = messageType;
       msgToHost->toHostData.messagePermissions = messagePermissions;
-      msgToHost->permissions = nanoapp->getAppPermissions();
+      msgToHost->toHostData.appPermissions = nanoapp->getAppPermissions();
       msgToHost->toHostData.nanoappFreeFunction = freeCallback;
 
       // Let the nanoapp know that it woke up the host and record it

@@ -117,6 +117,11 @@ bool HostProtocolChre::decodeMessageFromHost(const void *message,
         break;
       }
 
+      case fbs::ChreMessage::SelfTestRequest: {
+        HostMessageHandlers::handleSelfTestRequest(hostClientId);
+        break;
+      }
+
       default:
         LOGW("Got invalid/unexpected message type %" PRIu8,
              static_cast<uint8_t>(container->message_type()));
@@ -247,6 +252,14 @@ void HostProtocolChre::encodeLowPowerMicAccessRelease(
            request.Union());
 }
 
+void HostProtocolChre::encodeSelfTestResponse(ChreFlatBufferBuilder &builder,
+                                              uint16_t hostClientId,
+                                              bool success) {
+  auto response = fbs::CreateSelfTestResponse(builder, success);
+  finalize(builder, fbs::ChreMessage::SelfTestResponse, response.Union(),
+           hostClientId);
+}
+
 bool HostProtocolChre::getSettingFromFbs(fbs::Setting setting,
                                          Setting *chreSetting) {
   bool success = true;
@@ -260,8 +273,8 @@ bool HostProtocolChre::getSettingFromFbs(fbs::Setting setting,
     case fbs::Setting::AIRPLANE_MODE:
       *chreSetting = Setting::AIRPLANE_MODE;
       break;
-    case fbs::Setting::GLOBAL_MIC_DISABLE:
-      *chreSetting = Setting::GLOBAL_MIC_DISABLE;
+    case fbs::Setting::MICROPHONE:
+      *chreSetting = Setting::MICROPHONE;
       break;
     default:
       LOGE("Unknown setting %" PRIu8, static_cast<uint8_t>(setting));

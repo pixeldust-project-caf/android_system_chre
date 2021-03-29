@@ -336,7 +336,6 @@ struct ChppClientServiceSet {
   bool gnssClient : 1;
   bool wwanClient : 1;
   bool loopbackClient : 1;
-  bool timesyncClient : 1;
 };
 
 struct ChppLoopbackClientState;
@@ -370,6 +369,7 @@ struct ChppAppState {
   struct ChppTimesyncClientState *timesyncClientContext;
 
   // For discovery clients
+  bool isDiscoveryClientEverInitialized;
   bool isDiscoveryClientInitialized;
   bool isDiscoveryComplete;
 

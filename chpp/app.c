@@ -629,14 +629,13 @@ void chppAppInitWithClientServiceSet(
 
   chppPalSystemApiInit(appContext);
 
-#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
-  chppDiscoveryInit(appContext);
-#endif
 #ifdef CHPP_SERVICE_ENABLED
   chppRegisterCommonServices(appContext);
 #endif
+
 #ifdef CHPP_CLIENT_ENABLED
   chppRegisterCommonClients(appContext);
+  chppInitBasicClients(appContext);
 #endif
 }
 
@@ -644,13 +643,13 @@ void chppAppDeinit(struct ChppAppState *appContext) {
   CHPP_LOGD("App deinit");
 
 #ifdef CHPP_CLIENT_ENABLED
+  chppDeinitMatchedClients(appContext);
+  chppDeinitBasicClients(appContext);
   chppDeregisterCommonClients(appContext);
 #endif
+
 #ifdef CHPP_SERVICE_ENABLED
   chppDeregisterCommonServices(appContext);
-#endif
-#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
-  chppDiscoveryDeinit(appContext);
 #endif
 
   chppPalSystemApiDeinit(appContext);
@@ -728,6 +727,10 @@ void chppAppProcessRxReset(struct ChppAppState *context) {
       ResetNotifierFunction(context->registeredServiceContexts[i]);
     }
   }
+
+#ifdef CHPP_CLIENT_ENABLED_TIMESYNC
+  chppTimesyncClientReset(context);
+#endif
 }
 
 void chppUuidToStr(const uint8_t uuid[CHPP_SERVICE_UUID_LEN],
