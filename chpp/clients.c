@@ -412,18 +412,22 @@ bool chppClientSendOpenRequest(struct ChppClientState *clientState,
     CHPP_LOG_OOM();
 
   } else if (reopen) {
-    CHPP_LOGW("Reopening service after reset");
+    CHPP_LOGD("Reopening service");
+    uint8_t priorState = clientState->openState;
     clientState->openState = CHPP_OPEN_STATE_OPENING;
     if (!chppSendTimestampedRequestOrFail(clientState, openRRState, request,
                                           sizeof(*request))) {
       clientState->openState = CHPP_OPEN_STATE_CLOSED;
-      CHPP_ASSERT_LOG(false, "Failed to reopen service");
+      CHPP_LOGE("Failed to reopen service in state %" PRIu8, priorState);
+      if (priorState == CHPP_OPEN_STATE_PSEUDO_OPEN) {
+        clientState->openState = CHPP_OPEN_STATE_PSEUDO_OPEN;
+      }
     } else {
       result = true;
     }
 
   } else {
-    CHPP_LOGI("Opening service");
+    CHPP_LOGD("Opening service");
     clientState->openState = CHPP_OPEN_STATE_OPENING;
     if (!chppSendTimestampedRequestAndWait(clientState, openRRState, request,
                                            sizeof(*request))) {
