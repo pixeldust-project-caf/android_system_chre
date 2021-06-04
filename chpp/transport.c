@@ -55,9 +55,7 @@ static void chppProcessTransportLoopbackRequest(
 static void chppProcessTransportLoopbackResponse(
     struct ChppTransportState *context);
 #endif
-static void chppReset(struct ChppTransportState *context,
-                      enum ChppTransportPacketAttributes resetType,
-                      enum ChppTransportErrorCode error);
+static void chppSetResetComplete(struct ChppTransportState *context);
 static void chppProcessResetAck(struct ChppTransportState *context);
 static void chppProcessRxPayload(struct ChppTransportState *context);
 static void chppClearRxDatagram(struct ChppTransportState *context);
@@ -73,15 +71,21 @@ static struct ChppTransportHeader *chppAddHeader(
     struct ChppTransportState *context);
 static void chppAddPayload(struct ChppTransportState *context);
 static void chppAddFooter(struct PendingTxPacket *packet);
+size_t chppDequeueTxDatagram(struct ChppTransportState *context);
+static void chppClearTxDatagramQueue(struct ChppTransportState *context);
 static void chppTransportDoWork(struct ChppTransportState *context);
 static void chppAppendToPendingTxPacket(struct PendingTxPacket *packet,
                                         const uint8_t *buf, size_t len);
+static void chppAppendToPendingTxPacket(struct PendingTxPacket *packet,
+                                        const uint8_t *buf, size_t len);
+static const char *chppGetPacketAttrStr(uint8_t packetCode);
 static bool chppEnqueueTxDatagram(struct ChppTransportState *context,
                                   uint8_t packetCode, void *buf, size_t len);
-size_t chppDequeueTxDatagram(struct ChppTransportState *context);
-static void chppClearTxDatagramQueue(struct ChppTransportState *context);
 
 static void chppResetTransportContext(struct ChppTransportState *context);
+static void chppReset(struct ChppTransportState *context,
+                      enum ChppTransportPacketAttributes resetType,
+                      enum ChppTransportErrorCode error);
 
 /************************************************
  *  Private Functions
@@ -312,14 +316,6 @@ static size_t chppConsumeFooter(struct ChppTransportState *context,
       CHPP_LOGI("RX RESET-ACK packet. seq=%" PRIu8, context->rxHeader.seq);
       chppProcessResetAck(context);
 
-#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
-      chppMutexUnlock(&context->mutex);
-      chppInitiateDiscovery(context->appContext);
-      chppMutexLock(&context->mutex);
-#else
-      chppEnqueueTxPacket(context, CHPP_TRANSPORT_ERROR_NONE);
-#endif
-
     } else if (context->resetState == CHPP_RESET_STATE_RESETTING) {
       CHPP_LOGE("RX discarded in reset. seq=%" PRIu8 " len=%" PRIu16,
                 context->rxHeader.seq, context->rxHeader.length);
@@ -332,8 +328,9 @@ static size_t chppConsumeFooter(struct ChppTransportState *context,
                 context->rxHeader.ackSeq, context->rxHeader.flags,
                 context->rxHeader.packetCode);
 
+      uint64_t now = chppGetCurrentTimeNs();
       context->rxStatus.lastGoodPacketTimeMs =
-          (uint32_t)chppGetCurrentTimeNs() / (uint32_t)CHPP_NSEC_PER_MSEC;
+          (uint32_t)(now / CHPP_NSEC_PER_MSEC);
       context->rxStatus.receivedPacketCode = context->rxHeader.packetCode;
       chppRegisterRxAck(context);
 
@@ -531,6 +528,18 @@ static void chppProcessResetAck(struct ChppTransportState *context) {
 
   chppDatagramProcessDoneCb(context, context->rxDatagram.payload);
   chppClearRxDatagram(context);
+
+#ifdef CHPP_CLIENT_ENABLED_DISCOVERY
+  if (!context->appContext->isDiscoveryComplete) {
+    chppMutexUnlock(&context->mutex);
+    chppInitiateDiscovery(context->appContext);
+    chppMutexLock(&context->mutex);
+  } else {
+    chppEnqueueTxPacket(context, CHPP_TRANSPORT_ERROR_NONE);
+  }
+#else
+  chppEnqueueTxPacket(context, CHPP_TRANSPORT_ERROR_NONE);
+#endif
 }
 
 /**
@@ -688,11 +697,11 @@ static void chppRegisterRxAck(struct ChppTransportState *context) {
               .length);
 
       context->rxStatus.receivedAckSeq = rxAckSeq;
-      if (context->txStatus.retxCount > 1) {
-        CHPP_LOGW("Packet retx'd %" PRIuSIZE " times (seq %" PRIu8 ")",
-                  context->txStatus.retxCount, context->rxHeader.seq);
+      if (context->txStatus.txAttempts > 1) {
+        CHPP_LOGW("Seq %" PRIu8 "ACK rcv'd after %" PRIuSIZE "retx",
+                  context->rxHeader.seq, context->txStatus.txAttempts - 1);
       }
-      context->txStatus.retxCount = 0;
+      context->txStatus.txAttempts = 0;
 
       // Process and if necessary pop from Tx datagram queue
       context->txStatus.ackedLocInDatagram += CHPP_TRANSPORT_TX_MTU_BYTES;
@@ -933,9 +942,8 @@ static void chppTransportDoWork(struct ChppTransportState *context) {
 
       txHeader->seq = context->rxStatus.receivedAckSeq;
       context->txStatus.sentSeq = txHeader->seq;
-      context->txStatus.retxCount++;
 
-      if (context->txStatus.retxCount > CHPP_TRANSPORT_MAX_RETX &&
+      if (context->txStatus.txAttempts > CHPP_TRANSPORT_MAX_RETX &&
           context->resetState != CHPP_RESET_STATE_RESETTING) {
         CHPP_LOGE("Resetting after %d retries", CHPP_TRANSPORT_MAX_RETX);
         havePacketForLinkLayer = false;
@@ -947,6 +955,7 @@ static void chppTransportDoWork(struct ChppTransportState *context) {
 
       } else {
         chppAddPayload(context);
+        context->txStatus.txAttempts++;
       }
 
     } else {
@@ -1107,7 +1116,9 @@ static void chppResetTransportContext(struct ChppTransportState *context) {
 
 /**
  * Re-initializes the CHPP transport and app layer states, e.g. when receiving a
- * reset packet.
+ * reset packet, and sends out a reset or reset-ack packet over the link in
+ * order to reset the remote side or inform the counterpart of a reset,
+ * respectively.
  *
  * If the link layer is busy, this function will reset the link as well.
  * This function retains and restores the platform-specific values of
@@ -1234,8 +1245,8 @@ bool chppRxDataCb(struct ChppTransportState *context, const uint8_t *buf,
 
   CHPP_LOGD("RX %" PRIuSIZE " bytes: state=%" PRIu8, len,
             context->rxStatus.state);
-  context->rxStatus.lastDataTimeMs =
-      (uint32_t)chppGetCurrentTimeNs() / (uint32_t)CHPP_NSEC_PER_MSEC;
+  uint64_t now = chppGetCurrentTimeNs();
+  context->rxStatus.lastDataTimeMs = (uint32_t)(now / CHPP_NSEC_PER_MSEC);
   context->rxStatus.numTotalDataBytes += len;
 
   size_t consumed = 0;
@@ -1277,25 +1288,16 @@ bool chppRxDataCb(struct ChppTransportState *context, const uint8_t *buf,
           context->rxStatus.locInState == 0);
 }
 
-void chppTxTimeoutTimerCb(struct ChppTransportState *context) {
+void chppRxPacketCompleteCb(struct ChppTransportState *context) {
   chppMutexLock(&context->mutex);
-
-  // Implicit NACK. Enqueue Tx packet which will be a retransmission
-  chppEnqueueTxPacket(context, CHPP_TRANSPORT_ERROR_TIMEOUT);
-
-  chppMutexUnlock(&context->mutex);
-}
-
-void chppRxTimeoutTimerCb(struct ChppTransportState *context) {
-  CHPP_LOGE("Rx timeout: state=%" PRIu8 " packet=%" PRIu8 " len=%" PRIu16,
-            context->rxStatus.state, context->rxHeader.seq,
-            context->rxHeader.length);
-
-  chppMutexLock(&context->mutex);
-
-  chppRxAbortPacket(context);
-  chppSetRxState(context, CHPP_STATE_PREAMBLE);
-
+  if (context->rxStatus.state != CHPP_STATE_PREAMBLE) {
+    CHPP_LOGE("Rx pkt ended early: state=%" PRIu8 " packet=%" PRIu8
+              " len=%" PRIu16,
+              context->rxStatus.state, context->rxHeader.seq,
+              context->rxHeader.length);
+    chppRxAbortPacket(context);
+    chppEnqueueTxPacket(context, CHPP_TRANSPORT_ERROR_HEADER);  // NACK
+  }
   chppMutexUnlock(&context->mutex);
 }
 
@@ -1408,7 +1410,7 @@ bool chppWorkThreadHandleSignal(struct ChppTransportState *context,
     if ((context->resetState == CHPP_RESET_STATE_RESETTING) &&
         (chppGetCurrentTimeNs() - context->resetTimeNs >=
          CHPP_TRANSPORT_RESET_TIMEOUT_NS)) {
-      if (context->resetCount < CHPP_TRANSPORT_MAX_RESET) {
+      if (context->resetCount + 1 < CHPP_TRANSPORT_MAX_RESET) {
         CHPP_LOGE("RESET-ACK timeout; retrying");
         context->resetCount++;
         chppReset(context, CHPP_TRANSPORT_ATTR_RESET,
@@ -1545,7 +1547,7 @@ void chppTransportSendReset(struct ChppTransportState *context,
   // Make sure CHPP is in an initialized state
   CHPP_ASSERT_LOG((context->txDatagramQueue.pending == 0 &&
                    context->txDatagramQueue.front == 0),
-                  "Send reset but not initialized");
+                  "Not init to send reset");
 
   struct ChppTransportConfiguration *config =
       chppMalloc(sizeof(struct ChppTransportConfiguration));
@@ -1565,7 +1567,6 @@ void chppTransportSendReset(struct ChppTransportState *context,
   // Advertised transport layer (ACK) timeout
   config->timeoutInMs = CHPP_PLATFORM_TRANSPORT_TIMEOUT_MS;
 
-  // Send out the reset datagram
   if (resetType == CHPP_TRANSPORT_ATTR_RESET_ACK) {
     CHPP_LOGD("Sending RESET-ACK");
   } else {

@@ -57,18 +57,37 @@ class SensorRequestManager : public NonCopyable {
    *
    * @param sensorType The type of the sensor.
    * @param sensorIndex The index of the sensor.
+   * @param targetGroupId The target group ID that must be covered by the
+   *     matching sensor.
    * @param sensorHandle A non-null pointer to a uint32_t to use as a sensor
    *                     handle for nanoapps.
    * @return true if the supplied sensor type is available for use.
    */
   bool getSensorHandle(uint8_t sensorType, uint8_t sensorIndex,
-                       uint32_t *sensorHandle) const;
+                       uint16_t targetGroupId, uint32_t *sensorHandle) const;
 
   /**
-   * Same as getSensorHandle() but with the default sensor index.
+   * Same as getSensorHandle(), but the targetGroupId is derived based on the
+   * nanoapp's characteristics.
    */
-  bool getSensorHandle(uint8_t sensorType, uint32_t *sensorHandle) const {
-    return getSensorHandle(sensorType, CHRE_SENSOR_INDEX_DEFAULT, sensorHandle);
+  bool getSensorHandleForNanoapp(uint8_t sensorType, uint8_t sensorIndex,
+                                 const Nanoapp &nanoapp,
+                                 uint32_t *sensorHandle) const {
+    return getSensorHandle(sensorType, sensorIndex,
+                           mPlatformSensorManager.getTargetGroupId(nanoapp),
+                           sensorHandle);
+  }
+
+  /**
+   * Same as getSensorHandle(), but 0 is used for both the sensorIndex and
+   * targetGroupId so that the first sensor matching the type is used. This is
+   * useful when dealing with one-shot sensors that must only have a single
+   * instance.
+   */
+  bool getDefaultSensorHandle(uint8_t sensorType,
+                              uint32_t *sensorHandle) const {
+    return getSensorHandle(sensorType, 0 /* sensorIndex */,
+                           0 /* targetGroupId */, sensorHandle);
   }
 
   /**
@@ -284,20 +303,20 @@ class SensorRequestManager : public NonCopyable {
   //! An internal structure to store sensor request logs
   struct SensorRequestLog {
     SensorRequestLog(Nanoseconds timestampIn, uint32_t instanceIdIn,
-                     uint8_t sensorTypeIn, SensorMode modeIn,
+                     uint32_t sensorHandleIn, SensorMode modeIn,
                      Nanoseconds intervalIn, Nanoseconds latencyIn)
         : timestamp(timestampIn),
           interval(intervalIn),
           latency(latencyIn),
           instanceId(instanceIdIn),
-          sensorType(sensorTypeIn),
+          sensorHandle(sensorHandleIn),
           mode(modeIn) {}
 
     Nanoseconds timestamp;
     Nanoseconds interval;
     Nanoseconds latency;
     uint32_t instanceId;
-    uint8_t sensorType;
+    uint32_t sensorHandle;
     SensorMode mode;
   };
 
@@ -447,11 +466,11 @@ class SensorRequestManager : public NonCopyable {
    * off if full.
    *
    * @param nanoappInstanceId Instance ID of the nanoapp that made the request.
-   * @param sensorType The sensor type of requested sensor.
+   * @param sensorHandle The sensor handle for the sensor request being added.
    * @param sensorRequest The SensorRequest object holding params about
    *    request.
    */
-  void addSensorRequestLog(uint32_t nanoappInstanceId, uint8_t sensorType,
+  void addSensorRequestLog(uint32_t nanoappInstanceId, uint32_t sensorHandle,
                            const SensorRequest &sensorRequest);
 
   /**

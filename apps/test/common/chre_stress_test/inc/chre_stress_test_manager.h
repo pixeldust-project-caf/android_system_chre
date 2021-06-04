@@ -22,7 +22,9 @@
 #include <chre.h>
 #include <cinttypes>
 
+#include "chre/util/optional.h"
 #include "chre/util/singleton.h"
+#include "chre/util/time.h"
 
 namespace chre {
 
@@ -40,6 +42,15 @@ class Manager {
                    const void *eventData);
 
  private:
+  struct AsyncRequest {
+    AsyncRequest(const void *cookie_) {
+      cookie = cookie_;
+    }
+
+    uint64_t requestTimeNs = chreGetTime();
+    const void *cookie;
+  };
+
   /**
    * Handles a message from the host.
    *
@@ -48,6 +59,125 @@ class Manager {
    */
   void handleMessageFromHost(uint32_t senderInstanceId,
                              const chreMessageFromHostData *hostData);
+  /**
+   * Processes data from CHRE.
+   *
+   * @param eventType The event type as defined by CHRE.
+   * @param eventData A pointer to the data.
+   */
+  void handleDataFromChre(uint16_t eventType, const void *eventData);
+
+  /**
+   * @param handle A pointer to the timer handle.
+   */
+  void handleTimerEvent(const uint32_t *handle);
+
+  /**
+   * Handles a start command from the host.
+   *
+   * @param start true to start the test, stop otherwise.
+   */
+  void handleWifiStartCommand(bool start);
+  void handleGnssLocationStartCommand(bool start);
+  void handleGnssMeasurementStartCommand(bool start);
+  void handleWwanStartCommand(bool start);
+
+  /**
+   * @param result The WiFi async result from CHRE.
+   */
+  void handleWifiAsyncResult(const chreAsyncResult *result);
+
+  /**
+   * @param result The WiFi scan event from CHRE.
+   */
+  void handleWifiScanEvent(const chreWifiScanEvent *event);
+
+  /**
+   * Sets up a WiFi scan request after some time.
+   */
+  void requestDelayedWifiScan();
+
+  /**
+   * Sends the failure to the host.
+   *
+   * @param errorMessage The error message string.
+   */
+  void sendFailure(const char *errorMessage);
+
+  /**
+   * Sets/cancels a timer and asserts success.
+   *
+   * @param delayNs The delay of the timer in nanoseconds.
+   * @param oneShot true if the timer request is one-shot.
+   * @param timerHandle A non-null pointer to where the timer handle is stored.
+   */
+  void setTimer(uint64_t delayNs, bool oneShot, uint32_t *timerHandle);
+  void cancelTimer(uint32_t *timerHandle);
+
+  /**
+   * Makes the next GNSS request.
+   */
+  void makeGnssLocationRequest();
+  void makeGnssMeasurementRequest();
+
+  /**
+   * @param result The GNSS async result from CHRE.
+   */
+  void handleGnssAsyncResult(const chreAsyncResult *result);
+
+  /**
+   * @param result The result to validate.
+   * @param request The async request associated with this result.
+   * @param asyncTimerHandle The async timer handle for this request.
+   */
+  void validateGnssAsyncResult(const chreAsyncResult *result,
+                               Optional<AsyncRequest> &request,
+                               uint32_t *asyncTimerHandle);
+
+  /**
+   * @param event The GNSS event from CHRE.
+   */
+  void handleGnssLocationEvent(const chreGnssLocationEvent *event);
+  void handleGnssDataEvent(const chreGnssDataEvent *event);
+
+  /**
+   * Makes the next cell info request.
+   */
+  void makeWwanCellInfoRequest();
+
+  /**
+   * @param event The cell info event from CHRE.
+   */
+  void handleCellInfoResult(const chreWwanCellInfoResult *event);
+
+  //! The host endpoint of the current test host.
+  Optional<uint16_t> mHostEndpoint;
+
+  //! The timer handle for performing requests.
+  uint32_t mWifiScanTimerHandle = CHRE_TIMER_INVALID;
+  uint32_t mGnssLocationTimerHandle = CHRE_TIMER_INVALID;
+  uint32_t mGnssLocationAsyncTimerHandle = CHRE_TIMER_INVALID;
+  uint32_t mGnssMeasurementTimerHandle = CHRE_TIMER_INVALID;
+  uint32_t mGnssMeasurementAsyncTimerHandle = CHRE_TIMER_INVALID;
+  uint32_t mWwanTimerHandle = CHRE_TIMER_INVALID;
+
+  //! true if the test has been started for the feature.
+  bool mWifiTestStarted = false;
+  bool mGnssLocationTestStarted = false;
+  bool mGnssMeasurementTestStarted = false;
+  bool mWwanTestStarted = false;
+
+  //! The cookie to use for requests.
+  const uint32_t kOnDemandWifiScanCookie = 0xface;
+  const uint32_t kGnssLocationCookie = 0xbeef;
+  const uint32_t kGnssMeasurementCookie = 0xbead;
+  const uint32_t kWwanCellInfoCookie = 0x1337;
+
+  //! The pending requests.
+  Optional<AsyncRequest> mWifiScanAsyncRequest;
+  Optional<AsyncRequest> mGnssLocationAsyncRequest;
+  Optional<AsyncRequest> mGnssMeasurementAsyncRequest;
+  Optional<AsyncRequest> mWwanCellInfoAsyncRequest;
 };
 
 // The stress test manager singleton.

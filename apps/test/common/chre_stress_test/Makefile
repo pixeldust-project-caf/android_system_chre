@@ -51,6 +51,8 @@ COMMON_CFLAGS += -I$(TEST_SHARED_PATH)/inc
 # Permission declarations ######################################################
 
 CHRE_NANOAPP_USES_WIFI = true
+CHRE_NANOAPP_USES_GNSS = true
+CHRE_NANOAPP_USES_WWAN = true
 
 # Makefile Includes ############################################################
 
