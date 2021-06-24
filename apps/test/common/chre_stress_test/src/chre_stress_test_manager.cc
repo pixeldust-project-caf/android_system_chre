@@ -67,6 +67,10 @@ void Manager::handleMessageFromHost(uint32_t senderInstanceId,
   uint32_t messageType = hostData->messageType;
   if (senderInstanceId != CHRE_INSTANCE_ID) {
     LOGE("Incorrect sender instance id: %" PRIu32, senderInstanceId);
+  } else if (messageType == chre_stress_test_MessageType_TEST_HOST_RESTARTED) {
+    // Do nothing and only update the host endpoint
+    mHostEndpoint = hostData->hostEndpoint;
+    success = true;
   } else if (messageType != chre_stress_test_MessageType_TEST_COMMAND) {
     LOGE("Invalid message type %" PRIu32, messageType);
   } else if (mHostEndpoint.has_value() &&
@@ -288,10 +292,17 @@ void Manager::handleGnssLocationEvent(const chreGnssLocationEvent *event) {
 }
 
 void Manager::handleGnssDataEvent(const chreGnssDataEvent *event) {
-  LOGI("Received GNSS measurement event at %" PRIu64 " ns",
-       event->clock.time_ns);
+  static uint32_t sPrevDiscontCount = 0;
+  LOGI("Received GNSS measurement event at %" PRIu64 " ns count %" PRIu32
+       " flags 0x%" PRIx16,
+       event->clock.time_ns, event->clock.hw_clock_discontinuity_count,
+       event->clock.flags);
 
-  checkTimestamp(event->clock.time_ns, mPrevGnssMeasurementEventTimestampNs);
+  if (sPrevDiscontCount == event->clock.hw_clock_discontinuity_count) {
+    checkTimestamp(event->clock.time_ns, mPrevGnssMeasurementEventTimestampNs);
+  }
+
+  sPrevDiscontCount = event->clock.hw_clock_discontinuity_count;
   mPrevGnssMeasurementEventTimestampNs = event->clock.time_ns;
 }
 
