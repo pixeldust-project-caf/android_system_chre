@@ -86,8 +86,10 @@ static void chppResetTransportContext(struct ChppTransportState *context);
 static void chppReset(struct ChppTransportState *context,
                       enum ChppTransportPacketAttributes resetType,
                       enum ChppTransportErrorCode error);
+#ifdef CHPP_CLIENT_ENABLED
 struct ChppAppHeader *chppTransportGetClientRequestTimeoutResponse(
     struct ChppTransportState *context);
+#endif
 
 /************************************************
  *  Private Functions
@@ -527,6 +529,11 @@ static void chppProcessResetAck(struct ChppTransportState *context) {
 #else
   chppEnqueueTxPacket(context, CHPP_TRANSPORT_ERROR_NONE);
 #endif
+
+  // Inform the App Layer that a reset has completed
+  chppMutexUnlock(&context->mutex);
+  chppAppProcessReset(context->appContext);
+  chppMutexLock(&context->mutex);
 }
 
 /**
@@ -928,7 +935,7 @@ static void chppClearTxDatagramQueue(struct ChppTransportState *context) {
 static void chppTransportDoWork(struct ChppTransportState *context) {
   bool havePacketForLinkLayer = false;
   struct ChppTransportHeader *txHeader;
-  struct ChppAppHeader *timeoutResponse;
+  struct ChppAppHeader *timeoutResponse = NULL;
 
   // Note: For a future ACK window >1, there needs to be a loop outside the lock
   chppMutexLock(&context->mutex);
@@ -1011,7 +1018,9 @@ static void chppTransportDoWork(struct ChppTransportState *context) {
     }
   }
 
+#ifdef CHPP_CLIENT_ENABLED
   timeoutResponse = chppTransportGetClientRequestTimeoutResponse(context);
+#endif
   if (timeoutResponse != NULL) {
     CHPP_LOGE("Response timeout H#%" PRIu8 " cmd=%" PRIu16 " ID=%" PRIu8,
               timeoutResponse->handle, timeoutResponse->command,
@@ -1196,8 +1205,10 @@ static void chppReset(struct ChppTransportState *transportContext,
   chppMutexUnlock(&transportContext->mutex);
   chppTransportSendReset(transportContext, resetType, error);
 
-  // Inform the App Layer
-  chppAppProcessReset(appContext);
+  // Inform the App Layer that a reset has completed
+  if (resetType == CHPP_TRANSPORT_ATTR_RESET_ACK) {
+    chppAppProcessReset(appContext);
+  }  // else reset is sent out. Rx of reset-ack will indicate completion.
 }
 
 /**
@@ -1207,6 +1218,7 @@ static void chppReset(struct ChppTransportState *transportContext,
  * @param context Maintains status for each transport layer instance.
  * @return App layer response header if a timeout has occurred. Null otherwise.
  */
+#ifdef CHPP_CLIENT_ENABLED
 struct ChppAppHeader *chppTransportGetClientRequestTimeoutResponse(
     struct ChppTransportState *context) {
   struct ChppAppHeader *response = NULL;
@@ -1228,7 +1240,7 @@ struct ChppAppHeader *chppTransportGetClientRequestTimeoutResponse(
            context->appContext->registeredClients[clientIdx]->rRStateCount;
            cmdIdx++) {
         struct ChppRequestResponseState *rRState =
-            &context->appContext->registeredClients[clientIdx]
+            &context->appContext->registeredClientStates[clientIdx]
                  ->rRStates[cmdIdx];
 
         if (rRState->requestState == CHPP_REQUEST_STATE_REQUEST_SENT &&
@@ -1259,7 +1271,7 @@ struct ChppAppHeader *chppTransportGetClientRequestTimeoutResponse(
       response->handle = CHPP_SERVICE_HANDLE_OF_INDEX(timedOutClient);
       response->type = CHPP_MESSAGE_TYPE_SERVICE_RESPONSE;
       response->transaction =
-          context->appContext->registeredClients[timedOutClient]
+          context->appContext->registeredClientStates[timedOutClient]
               ->rRStates[timedOutCmd]
               .transaction;
       response->error = CHPP_APP_ERROR_TIMEOUT;
@@ -1271,6 +1283,7 @@ struct ChppAppHeader *chppTransportGetClientRequestTimeoutResponse(
 
   return response;
 }
+#endif
 
 /************************************************
  *  Public Functions
@@ -1420,25 +1433,31 @@ bool chppEnqueueTxDatagramOrFail(struct ChppTransportState *context, void *buf,
   return success;
 }
 
+// TODO(b/192359485): Consider removing this function, or making it more robust.
 void chppEnqueueTxErrorDatagram(struct ChppTransportState *context,
                                 enum ChppTransportErrorCode errorCode) {
-  switch (errorCode) {
-    case CHPP_TRANSPORT_ERROR_OOM: {
-      CHPP_LOGD("App layer enqueueing CHPP_TRANSPORT_ERROR_OOM");
-      break;
+  bool resetting = (context->resetState == CHPP_RESET_STATE_RESETTING);
+  if (resetting) {
+    CHPP_LOGE("Discarding app error 0x%" PRIx8 " (resetting)", errorCode);
+  } else {
+    switch (errorCode) {
+      case CHPP_TRANSPORT_ERROR_OOM: {
+        CHPP_LOGD("App layer enqueueing CHPP_TRANSPORT_ERROR_OOM");
+        break;
+      }
+      case CHPP_TRANSPORT_ERROR_APPLAYER: {
+        CHPP_LOGD("App layer enqueueing CHPP_TRANSPORT_ERROR_APPLAYER");
+        break;
+      }
+      default: {
+        // App layer should not invoke any other errors
+        CHPP_LOGE("App enqueueing invalid err=%" PRIu8, errorCode);
+        CHPP_DEBUG_ASSERT(false);
+      }
     }
-    case CHPP_TRANSPORT_ERROR_APPLAYER: {
-      CHPP_LOGD("App layer enqueueing CHPP_TRANSPORT_ERROR_APPLAYER");
-      break;
-    }
-    default: {
-      // App layer should not invoke any other errors
-      CHPP_LOGE("App enqueueing invalid err=%" PRIu8, errorCode);
-      CHPP_DEBUG_ASSERT(false);
-    }
+    chppEnqueueTxPacket(context, CHPP_ATTR_AND_ERROR_TO_PACKET_CODE(
+                                     CHPP_TRANSPORT_ATTR_NONE, errorCode));
   }
-  chppEnqueueTxPacket(context, CHPP_ATTR_AND_ERROR_TO_PACKET_CODE(
-                                   CHPP_TRANSPORT_ATTR_NONE, errorCode));
 }
 
 uint64_t chppTransportGetTimeUntilNextDoWorkNs(
