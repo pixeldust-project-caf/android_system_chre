@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2021 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,21 @@
  * limitations under the License.
  */
 
-#include "chre/platform/platform_debug_dump_manager.h"
+#ifndef CHPP_PLATFORM_GNSS_SERVICE_H_
+#define CHPP_PLATFORM_GNSS_SERVICE_H_
 
-namespace chre {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-PlatformDebugDumpManagerBase::PlatformDebugDumpManagerBase() {}
+/**
+ * Helper functions to force send a measurement or data event from the service.
+ */
+void gnssPalSendLocationEvent(void);
+void gnssPalSendMeasurementEvent(void);
 
-PlatformDebugDumpManagerBase::~PlatformDebugDumpManagerBase() {}
+#ifdef __cplusplus
+}
+#endif
 
-void PlatformDebugDumpManager::sendDebugDump(const char * /*debugStr*/,
-                                             bool /*complete*/) {}
-
-void PlatformDebugDumpManager::logStateToBuffer(
-    DebugDumpWrapper & /* debugDump */) {}
-
-}  // namespace chre
+#endif  // CHPP_PLATFORM_GNSS_SERVICE_H_

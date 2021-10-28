@@ -148,6 +148,7 @@ cc_library_shared {
     relative_install_path: "hw",
     srcs: [
         "host/hal_generic/V1_0/generic_context_hub_v1_0.cc",
+        "host/hal_generic/common/hal_chre_socket_connection.cc",
         "host/hal_generic/common/permissions_util.cc",
     ],
     cflags: ["-Wall", "-Werror"],
@@ -176,6 +177,7 @@ cc_binary {
         "host/hal_generic/V1_1/generic_context_hub_v1_1.cc",
         "host/hal_generic/V1_1/service.cc",
         "host/hal_generic/common/context_hub_settings_util.cc",
+        "host/hal_generic/common/hal_chre_socket_connection.cc",
         "host/hal_generic/common/permissions_util.cc",
     ],
     init_rc: ["host/hal_generic/V1_1/android.hardware.contexthub@1.1-service-generic.rc"],
@@ -206,6 +208,7 @@ cc_binary {
         "host/hal_generic/V1_2/generic_context_hub_v1_2.cc",
         "host/hal_generic/V1_2/service.cc",
         "host/hal_generic/common/context_hub_settings_util.cc",
+        "host/hal_generic/common/hal_chre_socket_connection.cc",
         "host/hal_generic/common/permissions_util.cc",
     ],
     init_rc: ["host/hal_generic/V1_2/android.hardware.contexthub@1.2-service-generic.rc"],
@@ -225,6 +228,32 @@ cc_binary {
     ],
     static_libs: ["chre_client"],
     vintf_fragments: ["host/hal_generic/V1_2/android.hardware.contexthub@1.2-generic.xml"],
+}
+
+cc_binary {
+    name: "android.hardware.contexthub-service.generic",
+    defaults: ["hidl_defaults"],
+    vendor: true,
+    relative_install_path: "hw",
+    srcs: [
+        "host/hal_generic/aidl/generic_context_hub_aidl.cc",
+        "host/hal_generic/aidl/service.cc",
+        "host/hal_generic/common/hal_chre_socket_connection.cc",
+        "host/hal_generic/common/permissions_util.cc",
+    ],
+    local_include_dirs: ["host/hal_generic/common/"],
+    init_rc: ["host/hal_generic/aidl/android.hardware.contexthub-service.generic.rc"],
+    cflags: ["-Wall", "-Werror"],
+    shared_libs: [
+        "libcutils",
+        "liblog",
+        "libutils",
+        "libbase",
+        "libbinder_ndk",
+        "android.hardware.contexthub-V1-ndk",
+    ],
+    static_libs: ["chre_client"],
+    vintf_fragments: ["host/hal_generic/aidl/android.hardware.contexthub-service.generic.xml"],
 }
 
 cc_library_headers {
@@ -354,6 +383,9 @@ cc_test_host {
     static_libs: [
         "libgmock",
     ],
+    sanitize: {
+        address: true,
+    },
 }
 
 cc_test_host {
@@ -373,7 +405,11 @@ cc_test_host {
         "-DCHRE_ASSERTIONS_ENABLED=true",
         "-DCHRE_FILENAME=__FILE__",
         "-DCHRE_FIRST_SUPPORTED_API_VERSION=CHRE_API_VERSION_1_1",
+        "-DGTEST",
     ],
+    sanitize: {
+        address: true,
+    },
 }
 
 cc_library_static {
@@ -385,24 +421,31 @@ cc_library_static {
         "core/event_loop.cc",
         "core/event_loop_manager.cc",
         "core/event_ref_queue.cc",
+        "core/gnss_manager.cc",
         "core/nanoapp.cc",
         "core/timer_pool.cc",
+        "core/settings.cc",
         "platform/linux/assert.cc",
         "platform/linux/context.cc",
         "platform/linux/fatal_error.cc",
         "platform/linux/host_link.cc",
         "platform/linux/platform_nanoapp.cc",
         "platform/linux/platform_log.cc",
+        "platform/linux/platform_pal.cc",
         "platform/linux/power_control_manager.cc",
         "platform/linux/memory.cc",
         "platform/linux/memory_manager.cc",
         "platform/linux/system_time.cc",
         "platform/linux/system_timer.cc",
+        "platform/linux/pal_gnss.cc",
         "platform/shared/log_buffer.cc",
         "platform/shared/memory_manager.cc",
         "platform/shared/pal_system_api.cc",
         "platform/shared/system_time.cc",
         "platform/shared/version.cc",
+        "platform/shared/platform_gnss.cc",
+        "platform/shared/chre_api_gnss.cc",
+        "platform/shared/chre_api_user_settings.cc",
         "util/**/*.cc",
     ],
     export_include_dirs: [
@@ -426,6 +469,7 @@ cc_library_static {
         "-DCHRE_FILENAME=__FILE__",
         "-DGTEST",
         "-DCHRE_FIRST_SUPPORTED_API_VERSION=CHRE_API_VERSION_1_1",
+        "-DCHRE_GNSS_SUPPORT_ENABLED",
     ],
     static_libs: [
         "libgtest",

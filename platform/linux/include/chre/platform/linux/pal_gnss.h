@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The Android Open Source Project
+ * Copyright (C) 2021 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,18 +14,17 @@
  * limitations under the License.
  */
 
-#include "chre/platform/platform_debug_dump_manager.h"
+#ifndef CHRE_PLATFORM_LINUX_PAL_GNSS_H_
+#define CHRE_PLATFORM_LINUX_PAL_GNSS_H_
 
-namespace chre {
+/**
+ * @return true if the GNSS location session is enabled in the GNSS PAL.
+ */
+bool chrePalGnssIsLocationEnabled();
 
-PlatformDebugDumpManagerBase::PlatformDebugDumpManagerBase() {}
+/**
+ * @return true if the GNSS measurement session is enabled in the GNSS PAL.
+ */
+bool chrePalGnssIsMeasurementEnabled();
 
-PlatformDebugDumpManagerBase::~PlatformDebugDumpManagerBase() {}
-
-void PlatformDebugDumpManager::sendDebugDump(const char * /*debugStr*/,
-                                             bool /*complete*/) {}
-
-void PlatformDebugDumpManager::logStateToBuffer(
-    DebugDumpWrapper & /* debugDump */) {}
-
-}  // namespace chre
+#endif  // CHRE_PLATFORM_LINUX_PAL_GNSS_H_
