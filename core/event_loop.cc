@@ -27,6 +27,7 @@
 #include "chre/util/conditional_lock_guard.h"
 #include "chre/util/lock_guard.h"
 #include "chre/util/system/debug_dump.h"
+#include "chre/util/system/stats_container.h"
 #include "chre/util/time.h"
 #include "chre_api/chre/version.h"
 
@@ -109,9 +110,7 @@ void EventLoop::run() {
     // queue mEvents (potentially posted from another thread), then within
     // this context these events are distributed to all interested Nanoapps,
     // with their free callback invoked after distribution.
-    if (mEvents.size() > mMaxEventPoolUsage) {
-      mMaxEventPoolUsage = mEvents.size();
-    }
+    mEventPoolUsage.addValue(mEvents.size());
 
     // mEvents.pop() will be a blocking call if mEvents.empty()
     Event *event = mEvents.pop();
@@ -341,10 +340,12 @@ bool EventLoop::currentNanoappIsStopping() const {
 
 void EventLoop::logStateToBuffer(DebugDumpWrapper &debugDump) const {
   debugDump.print("\nEvent Loop:\n");
-  debugDump.print("  Max event pool usage: %zu/%zu\n", mMaxEventPoolUsage,
-                  kMaxEventCount);
+  debugDump.print("  Max event pool usage: %" PRIu32 "/%zu\n",
+                  mEventPoolUsage.getMax(), kMaxEventCount);
   debugDump.print("  Number of low priority events dropped: %" PRIu32 "\n",
                   mNumDroppedLowPriEvents);
+  debugDump.print("  Mean event pool usage: %" PRIu32 "/%zu\n",
+                  mEventPoolUsage.getMean(), kMaxEventCount);
 
   Nanoseconds timeSince =
       SystemTime::getMonotonicTime() - mTimeLastWakeupBucketCycled;
@@ -390,8 +391,7 @@ void EventLoop::distributeEvent(Event *event) {
   bool eventDelivered = false;
   for (const UniquePtr<Nanoapp> &app : mNanoapps) {
     if ((event->targetInstanceId == chre::kBroadcastInstanceId &&
-         app->isRegisteredForBroadcastEvent(event->eventType,
-                                            event->targetAppGroupMask)) ||
+         app->isRegisteredForBroadcastEvent(event)) ||
         event->targetInstanceId == app->getInstanceId()) {
       eventDelivered = true;
       deliverNextEvent(app, event);
