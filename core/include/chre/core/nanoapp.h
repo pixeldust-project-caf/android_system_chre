@@ -88,11 +88,9 @@ class Nanoapp : public PlatformNanoapp {
   }
 
   /**
-   * @return true if the nanoapp should receive broadcast events with the given
-   *         type
+   * @return true if the nanoapp should receive broadcast event
    */
-  bool isRegisteredForBroadcastEvent(uint16_t eventType,
-                                     uint16_t targetGroupIdMask) const;
+  bool isRegisteredForBroadcastEvent(const Event *event) const;
 
   /**
    * Updates the Nanoapp's registration so that it will receive broadcast events
@@ -189,6 +187,16 @@ class Nanoapp : public PlatformNanoapp {
    */
   bool permitPermissionUse(uint32_t permission) const;
 
+  /**
+   * Configures notification updates for a given host endpoint.
+   *
+   * @param hostEndpointId The ID of the host endpoint.
+   * @param enable true to enable notifications.
+   *
+   * @return true if the configuration is successful.
+   */
+  bool configureHostEndpointNotifications(uint16_t hostEndpointId, bool enable);
+
  private:
   uint32_t mInstanceId = kInvalidInstanceId;
 
@@ -222,6 +230,9 @@ class Nanoapp : public PlatformNanoapp {
   // who care about them).
   DynamicVector<EventRegistration> mRegisteredEvents;
 
+  //! The registered host endpoints to receive notifications for.
+  DynamicVector<uint16_t> mRegisteredHostEndpoints;
+
   //! @return index of event registration if found. mRegisteredEvents.size() if
   //!     not.
   size_t registrationIndex(uint16_t eventType) const;
@@ -233,6 +244,11 @@ class Nanoapp : public PlatformNanoapp {
    * @param event The pointer to the event
    */
   void handleGnssMeasurementDataEvent(const Event *event);
+
+  bool isRegisteredForHostEndpointNotifications(uint16_t hostEndpointId) const {
+    return mRegisteredHostEndpoints.find(hostEndpointId) !=
+           mRegisteredHostEndpoints.size();
+  }
 };
 
 }  // namespace chre
