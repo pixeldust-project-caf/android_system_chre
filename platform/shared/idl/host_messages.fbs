@@ -80,6 +80,14 @@ table HubInfoResponse {
 
 table NanoappListRequest {}
 
+/// Metadata regarding a Nanoapp RPC service. See the Android API
+/// core/java/android/hardware/location/NanoAppRpcService.java for more details
+/// on how this value is used by the Android application.
+table NanoappRpcService {
+  id: ulong;
+  version: uint;
+}
+
 table NanoappListEntry {
   app_id:ulong;
   version:uint;
@@ -94,6 +102,9 @@ table NanoappListEntry {
   /// Nanoapp permissions, if supported. Nanoapp permissions are required on
   /// CHRE API v1.5+, and are defined in chre/util/system/napp_permissions.h
   permissions:uint;
+
+  /// The list of RPC services supported by this nanoapp.
+  rpc_services:[NanoappRpcService];
 
   // TODO: memory usage
 }
@@ -334,6 +345,16 @@ table SelfTestResponse {
 table HostEndpointConnected {
   /// The host-side endpoint that has connected to the framework.
   host_endpoint:ushort;
+
+  /// The type of host endpoint, which should be any of the CHRE_HOST_ENDPOINT_TYPE_*
+  /// values defined in the chre_api/chre/event.h.
+  type:ubyte;
+
+  /// The (optional) package name associated with the host endpoint.
+  package_name:string;
+
+  /// The (optional) attribution tag associated with this host.
+  attribution_tag:string;
 }
 
 // Message sent whenever a host endpoint has disconnected from the Context Hub.
