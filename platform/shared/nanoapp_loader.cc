@@ -202,6 +202,8 @@ const ExportedData gExportedData[] = {
     ADD_EXPORTED_C_SYMBOL(chreAbort),
     ADD_EXPORTED_C_SYMBOL(chreAudioConfigureSource),
     ADD_EXPORTED_C_SYMBOL(chreAudioGetSource),
+    ADD_EXPORTED_C_SYMBOL(chreBleGetCapabilities),
+    ADD_EXPORTED_C_SYMBOL(chreBleGetFilterCapabilities),
     ADD_EXPORTED_C_SYMBOL(chreConfigureDebugDumpEvent),
     ADD_EXPORTED_C_SYMBOL(chreConfigureHostSleepStateEvents),
     ADD_EXPORTED_C_SYMBOL(chreConfigureNanoappInfoEvents),
@@ -245,10 +247,15 @@ const ExportedData gExportedData[] = {
     ADD_EXPORTED_C_SYMBOL(chreWifiGetCapabilities),
     ADD_EXPORTED_C_SYMBOL(chreWifiRequestScanAsync),
     ADD_EXPORTED_C_SYMBOL(chreWifiRequestRangingAsync),
+    ADD_EXPORTED_C_SYMBOL(chreWifiNanRequestRangingAsync),
+    ADD_EXPORTED_C_SYMBOL(chreWifiNanSubscribe),
+    ADD_EXPORTED_C_SYMBOL(chreWifiNanSubscribeCancel),
     ADD_EXPORTED_C_SYMBOL(chreWwanGetCapabilities),
     ADD_EXPORTED_C_SYMBOL(chreWwanGetCellInfoAsync),
     ADD_EXPORTED_C_SYMBOL(platform_chreDebugDumpVaLog),
     ADD_EXPORTED_C_SYMBOL(chreConfigureHostEndpointNotifications),
+    ADD_EXPORTED_C_SYMBOL(chrePublishRpcServices),
+    ADD_EXPORTED_C_SYMBOL(chreGetHostEndpointInfo),
 };
 CHRE_DEPRECATED_EPILOGUE
 // clang-format on

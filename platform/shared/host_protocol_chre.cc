@@ -127,7 +127,29 @@ bool HostProtocolChre::decodeMessageFromHost(const void *message,
         const auto *connectedMessage =
             static_cast<const fbs::HostEndpointConnected *>(
                 container->message());
-        postHostEndpointConnected(connectedMessage->host_endpoint());
+        struct chreHostEndpointInfo info;
+        info.hostEndpointId = connectedMessage->host_endpoint();
+        info.hostEndpointType = connectedMessage->type();
+        if (connectedMessage->package_name()->size() > 0) {
+          info.isNameValid = true;
+          strncpy(&info.packageName[0],
+                  connectedMessage->package_name()->data(),
+                  CHRE_MAX_ENDPOINT_NAME_LEN);
+          info.packageName[CHRE_MAX_ENDPOINT_NAME_LEN - 1] = '\0';
+        } else {
+          info.isNameValid = false;
+        }
+        if (connectedMessage->attribution_tag()->size() > 0) {
+          info.isTagValid = true;
+          strncpy(&info.attributionTag[0],
+                  connectedMessage->attribution_tag()->data(),
+                  CHRE_MAX_ENDPOINT_TAG_LEN);
+          info.attributionTag[CHRE_MAX_ENDPOINT_NAME_LEN - 1] = '\0';
+        } else {
+          info.isTagValid = false;
+        }
+
+        postHostEndpointConnected(info);
         break;
       }
 
@@ -171,9 +193,23 @@ void HostProtocolChre::addNanoappListEntry(
     ChreFlatBufferBuilder &builder,
     DynamicVector<Offset<fbs::NanoappListEntry>> &offsetVector, uint64_t appId,
     uint32_t appVersion, bool enabled, bool isSystemNanoapp,
-    uint32_t appPermissions) {
+    uint32_t appPermissions,
+    const DynamicVector<struct chreNanoappRpcService> &rpcServices) {
+  DynamicVector<Offset<fbs::NanoappRpcService>> rpcServiceList;
+  for (const auto &service : rpcServices) {
+    Offset<fbs::NanoappRpcService> offsetService =
+        fbs::CreateNanoappRpcService(builder, service.id, service.version);
+    if (!rpcServiceList.push_back(offsetService)) {
+      LOGE("Couldn't push RPC service to list");
+    }
+  }
+
+  auto vectorOffset =
+      builder.CreateVector<Offset<fbs::NanoappRpcService>>(rpcServiceList);
   auto offset = fbs::CreateNanoappListEntry(builder, appId, appVersion, enabled,
-                                            isSystemNanoapp, appPermissions);
+                                            isSystemNanoapp, appPermissions,
+                                            vectorOffset);
+
   if (!offsetVector.push_back(offset)) {
     LOGE("Couldn't push nanoapp list entry offset!");
   }

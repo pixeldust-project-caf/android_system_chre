@@ -17,6 +17,8 @@ struct HubInfoResponse;
 
 struct NanoappListRequest;
 
+struct NanoappRpcService;
+
 struct NanoappListEntry;
 
 struct NanoappListResponse;
@@ -748,13 +750,67 @@ inline flatbuffers::Offset<NanoappListRequest> CreateNanoappListRequest(
   return builder_.Finish();
 }
 
+/// Metadata regarding a Nanoapp RPC service. See the Android API
+/// core/java/android/hardware/location/NanoAppRpcService.java for more details
+/// on how this value is used by the Android application.
+struct NanoappRpcService FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ID = 4,
+    VT_VERSION = 6
+  };
+  uint64_t id() const {
+    return GetField<uint64_t>(VT_ID, 0);
+  }
+  uint32_t version() const {
+    return GetField<uint32_t>(VT_VERSION, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint64_t>(verifier, VT_ID) &&
+           VerifyField<uint32_t>(verifier, VT_VERSION) &&
+           verifier.EndTable();
+  }
+};
+
+struct NanoappRpcServiceBuilder {
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_id(uint64_t id) {
+    fbb_.AddElement<uint64_t>(NanoappRpcService::VT_ID, id, 0);
+  }
+  void add_version(uint32_t version) {
+    fbb_.AddElement<uint32_t>(NanoappRpcService::VT_VERSION, version, 0);
+  }
+  explicit NanoappRpcServiceBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  NanoappRpcServiceBuilder &operator=(const NanoappRpcServiceBuilder &);
+  flatbuffers::Offset<NanoappRpcService> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<NanoappRpcService>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<NanoappRpcService> CreateNanoappRpcService(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t id = 0,
+    uint32_t version = 0) {
+  NanoappRpcServiceBuilder builder_(_fbb);
+  builder_.add_id(id);
+  builder_.add_version(version);
+  return builder_.Finish();
+}
+
 struct NanoappListEntry FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_APP_ID = 4,
     VT_VERSION = 6,
     VT_ENABLED = 8,
     VT_IS_SYSTEM = 10,
-    VT_PERMISSIONS = 12
+    VT_PERMISSIONS = 12,
+    VT_RPC_SERVICES = 14
   };
   uint64_t app_id() const {
     return GetField<uint64_t>(VT_APP_ID, 0);
@@ -777,6 +833,10 @@ struct NanoappListEntry FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   uint32_t permissions() const {
     return GetField<uint32_t>(VT_PERMISSIONS, 0);
   }
+  /// The list of RPC services supported by this nanoapp.
+  const flatbuffers::Vector<flatbuffers::Offset<NanoappRpcService>> *rpc_services() const {
+    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<NanoappRpcService>> *>(VT_RPC_SERVICES);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint64_t>(verifier, VT_APP_ID) &&
@@ -784,6 +844,9 @@ struct NanoappListEntry FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyField<uint8_t>(verifier, VT_ENABLED) &&
            VerifyField<uint8_t>(verifier, VT_IS_SYSTEM) &&
            VerifyField<uint32_t>(verifier, VT_PERMISSIONS) &&
+           VerifyOffset(verifier, VT_RPC_SERVICES) &&
+           verifier.VerifyVector(rpc_services()) &&
+           verifier.VerifyVectorOfTables(rpc_services()) &&
            verifier.EndTable();
   }
 };
@@ -806,6 +869,9 @@ struct NanoappListEntryBuilder {
   void add_permissions(uint32_t permissions) {
     fbb_.AddElement<uint32_t>(NanoappListEntry::VT_PERMISSIONS, permissions, 0);
   }
+  void add_rpc_services(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<NanoappRpcService>>> rpc_services) {
+    fbb_.AddOffset(NanoappListEntry::VT_RPC_SERVICES, rpc_services);
+  }
   explicit NanoappListEntryBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -824,14 +890,35 @@ inline flatbuffers::Offset<NanoappListEntry> CreateNanoappListEntry(
     uint32_t version = 0,
     bool enabled = true,
     bool is_system = false,
-    uint32_t permissions = 0) {
+    uint32_t permissions = 0,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<NanoappRpcService>>> rpc_services = 0) {
   NanoappListEntryBuilder builder_(_fbb);
   builder_.add_app_id(app_id);
+  builder_.add_rpc_services(rpc_services);
   builder_.add_permissions(permissions);
   builder_.add_version(version);
   builder_.add_is_system(is_system);
   builder_.add_enabled(enabled);
   return builder_.Finish();
+}
+
+inline flatbuffers::Offset<NanoappListEntry> CreateNanoappListEntryDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t app_id = 0,
+    uint32_t version = 0,
+    bool enabled = true,
+    bool is_system = false,
+    uint32_t permissions = 0,
+    const std::vector<flatbuffers::Offset<NanoappRpcService>> *rpc_services = nullptr) {
+  auto rpc_services__ = rpc_services ? _fbb.CreateVector<flatbuffers::Offset<NanoappRpcService>>(*rpc_services) : 0;
+  return chre::fbs::CreateNanoappListEntry(
+      _fbb,
+      app_id,
+      version,
+      enabled,
+      is_system,
+      permissions,
+      rpc_services__);
 }
 
 struct NanoappListResponse FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
@@ -1825,15 +1912,36 @@ inline flatbuffers::Offset<SelfTestResponse> CreateSelfTestResponse(
 
 struct HostEndpointConnected FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_HOST_ENDPOINT = 4
+    VT_HOST_ENDPOINT = 4,
+    VT_TYPE = 6,
+    VT_PACKAGE_NAME = 8,
+    VT_ATTRIBUTION_TAG = 10
   };
   /// The host-side endpoint that has connected to the framework.
   uint16_t host_endpoint() const {
     return GetField<uint16_t>(VT_HOST_ENDPOINT, 0);
   }
+  /// The type of host endpoint, which should be any of the CHRE_HOST_ENDPOINT_TYPE_*
+  /// values defined in the chre_api/chre/event.h.
+  uint8_t type() const {
+    return GetField<uint8_t>(VT_TYPE, 0);
+  }
+  /// The (optional) package name associated with the host endpoint.
+  const flatbuffers::String *package_name() const {
+    return GetPointer<const flatbuffers::String *>(VT_PACKAGE_NAME);
+  }
+  /// The (optional) attribution tag associated with this host.
+  const flatbuffers::String *attribution_tag() const {
+    return GetPointer<const flatbuffers::String *>(VT_ATTRIBUTION_TAG);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint16_t>(verifier, VT_HOST_ENDPOINT) &&
+           VerifyField<uint8_t>(verifier, VT_TYPE) &&
+           VerifyOffset(verifier, VT_PACKAGE_NAME) &&
+           verifier.VerifyString(package_name()) &&
+           VerifyOffset(verifier, VT_ATTRIBUTION_TAG) &&
+           verifier.VerifyString(attribution_tag()) &&
            verifier.EndTable();
   }
 };
@@ -1843,6 +1951,15 @@ struct HostEndpointConnectedBuilder {
   flatbuffers::uoffset_t start_;
   void add_host_endpoint(uint16_t host_endpoint) {
     fbb_.AddElement<uint16_t>(HostEndpointConnected::VT_HOST_ENDPOINT, host_endpoint, 0);
+  }
+  void add_type(uint8_t type) {
+    fbb_.AddElement<uint8_t>(HostEndpointConnected::VT_TYPE, type, 0);
+  }
+  void add_package_name(flatbuffers::Offset<flatbuffers::String> package_name) {
+    fbb_.AddOffset(HostEndpointConnected::VT_PACKAGE_NAME, package_name);
+  }
+  void add_attribution_tag(flatbuffers::Offset<flatbuffers::String> attribution_tag) {
+    fbb_.AddOffset(HostEndpointConnected::VT_ATTRIBUTION_TAG, attribution_tag);
   }
   explicit HostEndpointConnectedBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -1858,10 +1975,32 @@ struct HostEndpointConnectedBuilder {
 
 inline flatbuffers::Offset<HostEndpointConnected> CreateHostEndpointConnected(
     flatbuffers::FlatBufferBuilder &_fbb,
-    uint16_t host_endpoint = 0) {
+    uint16_t host_endpoint = 0,
+    uint8_t type = 0,
+    flatbuffers::Offset<flatbuffers::String> package_name = 0,
+    flatbuffers::Offset<flatbuffers::String> attribution_tag = 0) {
   HostEndpointConnectedBuilder builder_(_fbb);
+  builder_.add_attribution_tag(attribution_tag);
+  builder_.add_package_name(package_name);
   builder_.add_host_endpoint(host_endpoint);
+  builder_.add_type(type);
   return builder_.Finish();
+}
+
+inline flatbuffers::Offset<HostEndpointConnected> CreateHostEndpointConnectedDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    uint16_t host_endpoint = 0,
+    uint8_t type = 0,
+    const char *package_name = nullptr,
+    const char *attribution_tag = nullptr) {
+  auto package_name__ = package_name ? _fbb.CreateString(package_name) : 0;
+  auto attribution_tag__ = attribution_tag ? _fbb.CreateString(attribution_tag) : 0;
+  return chre::fbs::CreateHostEndpointConnected(
+      _fbb,
+      host_endpoint,
+      type,
+      package_name__,
+      attribution_tag__);
 }
 
 struct HostEndpointDisconnected FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
