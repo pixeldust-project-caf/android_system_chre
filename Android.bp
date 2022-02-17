@@ -243,16 +243,31 @@ cc_binary {
     ],
     local_include_dirs: ["host/hal_generic/common/"],
     init_rc: ["host/hal_generic/aidl/android.hardware.contexthub-service.generic.rc"],
-    cflags: ["-Wall", "-Werror"],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-DCHRE_MESSAGE_TO_HOST_MAX_SIZE=4000", // Needed to import CHRE APIs.
+        "-DCHRE_HAL_SOCKET_METRICS_ENABLED",
+    ],
     shared_libs: [
+        "android.frameworks.stats-V1-ndk",
         "libcutils",
         "liblog",
+        "libprotobuf-cpp-lite",
         "libutils",
         "libbase",
         "libbinder_ndk",
         "android.hardware.contexthub-V1-ndk",
+        "//hardware/google/pixel:pixelatoms-cpp",
     ],
-    static_libs: ["chre_client"],
+    // TODO(b/217754528): Re-enable this module
+    enabled: false,
+    header_libs: [
+        "chre_api",
+    ],
+    static_libs: [
+        "chre_client"
+    ],
     vintf_fragments: ["host/hal_generic/aidl/android.hardware.contexthub-service.generic.xml"],
 }
 
@@ -399,13 +414,8 @@ cc_test_host {
     static_libs: [
         "chre_linux",
     ],
-    cflags: [
-        "-DCHRE_MESSAGE_TO_HOST_MAX_SIZE=4096",
-        "-DCHRE_MINIMUM_LOG_LEVEL=CHRE_LOG_LEVEL_DEBUG",
-        "-DCHRE_ASSERTIONS_ENABLED=true",
-        "-DCHRE_FILENAME=__FILE__",
-        "-DCHRE_FIRST_SUPPORTED_API_VERSION=CHRE_API_VERSION_1_1",
-        "-DGTEST",
+    defaults: [
+        "chre_linux_cflags",
     ],
     sanitize: {
         address: true,
@@ -416,15 +426,18 @@ cc_library_static {
     name: "chre_linux",
     vendor: true,
     srcs: [
+        "core/ble_request_manager.cc",
         "core/init.cc",
         "core/event.cc",
         "core/event_loop.cc",
         "core/event_loop_manager.cc",
         "core/event_ref_queue.cc",
         "core/gnss_manager.cc",
+        "core/host_comms_manager.cc",
         "core/nanoapp.cc",
         "core/timer_pool.cc",
         "core/settings.cc",
+        "core/host_notifications.cc",
         "platform/linux/assert.cc",
         "platform/linux/context.cc",
         "platform/linux/fatal_error.cc",
@@ -438,13 +451,17 @@ cc_library_static {
         "platform/linux/memory_manager.cc",
         "platform/linux/system_time.cc",
         "platform/linux/system_timer.cc",
+        "platform/linux/pal_ble.cc",
         "platform/linux/pal_gnss.cc",
         "platform/shared/log_buffer.cc",
         "platform/shared/memory_manager.cc",
         "platform/shared/pal_system_api.cc",
         "platform/shared/system_time.cc",
         "platform/shared/version.cc",
+        "platform/shared/platform_ble.cc",
         "platform/shared/platform_gnss.cc",
+        "platform/shared/chre_api_ble.cc",
+        "platform/shared/chre_api_core.cc",
         "platform/shared/chre_api_gnss.cc",
         "platform/shared/chre_api_user_settings.cc",
         "util/**/*.cc",
@@ -463,20 +480,28 @@ cc_library_static {
     header_libs: [
         "chre_api",
     ],
-    cflags: [
-        "-DCHRE_MESSAGE_TO_HOST_MAX_SIZE=4096",
-        "-DCHRE_MINIMUM_LOG_LEVEL=CHRE_LOG_LEVEL_DEBUG",
-        "-DCHRE_ASSERTIONS_ENABLED=true",
-        "-DCHRE_FILENAME=__FILE__",
-        "-DGTEST",
-        "-DCHRE_FIRST_SUPPORTED_API_VERSION=CHRE_API_VERSION_1_1",
-        "-DCHRE_GNSS_SUPPORT_ENABLED",
+    defaults: [
+        "chre_linux_cflags",
     ],
     static_libs: [
         "libgtest",
         "libgmock",
     ],
     host_supported: true,
+}
+
+cc_defaults {
+   name: "chre_linux_cflags",
+   cflags: [
+        "-DCHRE_MESSAGE_TO_HOST_MAX_SIZE=4096",
+        "-DCHRE_MINIMUM_LOG_LEVEL=CHRE_LOG_LEVEL_DEBUG",
+        "-DCHRE_ASSERTIONS_ENABLED=true",
+        "-DCHRE_FILENAME=__FILE__",
+        "-DGTEST",
+        "-DCHRE_FIRST_SUPPORTED_API_VERSION=CHRE_API_VERSION_1_1",
+        "-DCHRE_BLE_SUPPORT_ENABLED",
+        "-DCHRE_GNSS_SUPPORT_ENABLED",
+    ],
 }
 
 subdirs = [

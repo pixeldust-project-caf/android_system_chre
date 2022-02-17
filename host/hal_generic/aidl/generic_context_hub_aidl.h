@@ -26,6 +26,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <unordered_set>
 
 namespace aidl {
 namespace android {
@@ -44,26 +45,24 @@ class ContextHub : public BnContextHub,
       std::vector<ContextHubInfo> *out_contextHubInfos) override;
   ::ndk::ScopedAStatus loadNanoapp(int32_t contextHubId,
                                    const NanoappBinary &appBinary,
-                                   int32_t transactionId,
-                                   bool *_aidl_return) override;
+                                   int32_t transactionId) override;
   ::ndk::ScopedAStatus unloadNanoapp(int32_t contextHubId, int64_t appId,
-                                     int32_t transactionId,
-                                     bool *_aidl_return) override;
+                                     int32_t transactionId) override;
   ::ndk::ScopedAStatus disableNanoapp(int32_t contextHubId, int64_t appId,
-                                      int32_t transactionId,
-                                      bool *_aidl_return) override;
+                                      int32_t transactionId) override;
   ::ndk::ScopedAStatus enableNanoapp(int32_t contextHubId, int64_t appId,
-                                     int32_t transactionId,
-                                     bool *_aidl_return) override;
+                                     int32_t transactionId) override;
   ::ndk::ScopedAStatus onSettingChanged(Setting setting, bool enabled) override;
-  ::ndk::ScopedAStatus queryNanoapps(int32_t contextHubId,
-                                     bool *_aidl_return) override;
+  ::ndk::ScopedAStatus queryNanoapps(int32_t contextHubId) override;
   ::ndk::ScopedAStatus registerCallback(
-      int32_t contextHubId, const std::shared_ptr<IContextHubCallback> &cb,
-      bool *_aidl_return) override;
-  ::ndk::ScopedAStatus sendMessageToHub(int32_t contextHubId,
-                                        const ContextHubMessage &message,
-                                        bool *_aidl_return) override;
+      int32_t contextHubId,
+      const std::shared_ptr<IContextHubCallback> &cb) override;
+  ::ndk::ScopedAStatus sendMessageToHub(
+      int32_t contextHubId, const ContextHubMessage &message) override;
+  ::ndk::ScopedAStatus onHostEndpointConnected(
+      const HostEndpointInfo &in_info) override;
+  ::ndk::ScopedAStatus onHostEndpointDisconnected(
+      char16_t in_hostEndpointId) override;
 
   void onNanoappMessage(const ::chre::fbs::NanoappMessageT &message) override;
 
@@ -97,6 +96,9 @@ class ContextHub : public BnContextHub,
 
   std::map<Setting, bool> mSettingEnabled;
   std::optional<bool> mIsWifiAvailable;
+
+  std::mutex mConnectedHostEndpointsMutex;
+  std::unordered_set<char16_t> mConnectedHostEndpoints;
 
   // Variables related to debug dump.
   static constexpr int kInvalidFd = -1;

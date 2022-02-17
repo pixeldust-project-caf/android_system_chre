@@ -60,7 +60,7 @@ endif
 # Optional tokenized logging support.
 ifeq ($(CHRE_TOKENIZED_LOGGING_ENABLED), true)
 COMMON_CFLAGS += -DCHRE_USE_TOKENIZED_LOGGING
-include $(CHRE_PREFIX)/build/pw_tokenizer.mk
+include $(CHRE_PREFIX)/external/pigweed/pw_tokenizer.mk
 endif
 
 # Optional on-device unit tests support
@@ -107,8 +107,6 @@ ifneq ($(CHRE_TARGET_EXTENSION),)
 include $(CHRE_TARGET_EXTENSION)
 endif
 include $(CHRE_PREFIX)/build/variant/google_arm64_android.mk
-include $(CHRE_PREFIX)/build/variant/google_hexagonv55_slpi-see.mk
-include $(CHRE_PREFIX)/build/variant/google_hexagonv60_slpi.mk
 include $(CHRE_PREFIX)/build/variant/google_hexagonv62_slpi.mk
 include $(CHRE_PREFIX)/build/variant/google_hexagonv62_slpi-uimg.mk
 include $(CHRE_PREFIX)/build/variant/google_hexagonv65_adsp-see.mk

@@ -30,6 +30,7 @@
 #include "chre/util/non_copyable.h"
 #include "chre/util/synchronized_memory_pool.h"
 #include "chre/util/system/debug_dump.h"
+#include "chre/util/system/stats_container.h"
 #include "chre/util/unique_ptr.h"
 #include "chre_api/chre/event.h"
 
@@ -310,6 +311,18 @@ class EventLoop : public NonCopyable {
     return mPowerControlManager;
   }
 
+  inline uint32_t getMaxEventQueueSize() const {
+    return mEventPoolUsage.getMax();
+  }
+
+  inline uint32_t getMeanEventQueueSize() const {
+    return mEventPoolUsage.getMean();
+  }
+
+  inline uint32_t getNumEventsDropped() const {
+    return mNumDroppedLowPriEvents;
+  }
+
  private:
   //! The maximum number of events that can be active in the system.
   static constexpr size_t kMaxEventCount = CHRE_MAX_EVENT_COUNT;
@@ -365,8 +378,8 @@ class EventLoop : public NonCopyable {
   //! The object which manages power related controls.
   PowerControlManager mPowerControlManager;
 
-  //! The maximum number of events ever waiting in the event pool.
-  size_t mMaxEventPoolUsage = 0;
+  //! The stats collection used to collect event pool usage
+  StatsContainer<uint32_t> mEventPoolUsage;
 
   //! The number of events dropped due to capacity limits
   uint32_t mNumDroppedLowPriEvents = 0;

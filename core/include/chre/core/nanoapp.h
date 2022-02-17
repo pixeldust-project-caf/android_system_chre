@@ -26,6 +26,7 @@
 #include "chre/util/fixed_size_vector.h"
 #include "chre/util/system/debug_dump.h"
 #include "chre/util/system/napp_permissions.h"
+#include "chre_api/chre/event.h"
 
 namespace chre {
 
@@ -88,11 +89,9 @@ class Nanoapp : public PlatformNanoapp {
   }
 
   /**
-   * @return true if the nanoapp should receive broadcast events with the given
-   *         type
+   * @return true if the nanoapp should receive broadcast event
    */
-  bool isRegisteredForBroadcastEvent(uint16_t eventType,
-                                     uint16_t targetGroupIdMask) const;
+  bool isRegisteredForBroadcastEvent(const Event *event) const;
 
   /**
    * Updates the Nanoapp's registration so that it will receive broadcast events
@@ -189,6 +188,36 @@ class Nanoapp : public PlatformNanoapp {
    */
   bool permitPermissionUse(uint32_t permission) const;
 
+  /**
+   * Configures notification updates for a given host endpoint.
+   *
+   * @param hostEndpointId The ID of the host endpoint.
+   * @param enable true to enable notifications.
+   *
+   * @return true if the configuration is successful.
+   */
+  bool configureHostEndpointNotifications(uint16_t hostEndpointId, bool enable);
+
+  /**
+   * Publishes RPC services for this nanoapp.
+   *
+   * @param services A pointer to the list of RPC services to publish.
+   *   Can be null if numServices is 0.
+   * @param numServices The number of services to publish, i.e. the length of
+   * the services array.
+   *
+   * @return true if the publishing is successful.
+   */
+  bool publishRpcServices(struct chreNanoappRpcService *services,
+                          size_t numServices);
+
+  /**
+   * @return The list of RPC services pushblished by this nanoapp.
+   */
+  const DynamicVector<struct chreNanoappRpcService> &getRpcServices() const {
+    return mRpcServices;
+  }
+
  private:
   uint32_t mInstanceId = kInvalidInstanceId;
 
@@ -222,6 +251,12 @@ class Nanoapp : public PlatformNanoapp {
   // who care about them).
   DynamicVector<EventRegistration> mRegisteredEvents;
 
+  //! The registered host endpoints to receive notifications for.
+  DynamicVector<uint16_t> mRegisteredHostEndpoints;
+
+  //! The list of RPC services for this nanoapp.
+  DynamicVector<struct chreNanoappRpcService> mRpcServices;
+
   //! @return index of event registration if found. mRegisteredEvents.size() if
   //!     not.
   size_t registrationIndex(uint16_t eventType) const;
@@ -233,6 +268,11 @@ class Nanoapp : public PlatformNanoapp {
    * @param event The pointer to the event
    */
   void handleGnssMeasurementDataEvent(const Event *event);
+
+  bool isRegisteredForHostEndpointNotifications(uint16_t hostEndpointId) const {
+    return mRegisteredHostEndpoints.find(hostEndpointId) !=
+           mRegisteredHostEndpoints.size();
+  }
 };
 
 }  // namespace chre
