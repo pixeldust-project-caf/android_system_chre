@@ -19,6 +19,7 @@
 
 #include "chre/util/dynamic_vector.h"
 #include "chre/util/non_copyable.h"
+#include "chre/util/system/debug_dump.h"
 #include "chre_api/chre/ble.h"
 
 namespace chre {
@@ -39,9 +40,9 @@ class BleRequest : public NonCopyable {
  public:
   BleRequest();
 
-  BleRequest(uint32_t instanceId, bool enable);
+  BleRequest(uint16_t instanceId, bool enable);
 
-  BleRequest(uint32_t instanceId, bool enable, chreBleScanMode mode,
+  BleRequest(uint16_t instanceId, bool enable, chreBleScanMode mode,
              uint32_t reportDelayMs, const chreBleScanFilter *filter);
 
   BleRequest(BleRequest &&other);
@@ -69,7 +70,7 @@ class BleRequest : public NonCopyable {
   /**
    * @return The instance id of the nanoapp that owns this request
    */
-  uint32_t getInstanceId() const;
+  uint16_t getInstanceId() const;
 
   /**
    * @return The scan mode of this request.
@@ -112,15 +113,27 @@ class BleRequest : public NonCopyable {
    */
   bool isEnabled() const;
 
+  /**
+   * Prints state in a string buffer. Must only be called from the context of
+   * the main CHRE thread.
+   *
+   * @param debugDump The debug dump wrapper where a string can be printed
+   * into one of the buffers.
+   * @param isPlatformRequest true if the request to be logged was sent to the
+   * platform.
+   */
+  void logStateToBuffer(DebugDumpWrapper &debugDump,
+                        bool isPlatformRequest = false) const;
+
  private:
+  // Maximum requested batching delay in ms.
+  uint32_t mReportDelayMs;
+
   // Instance id of nanoapp that sent the request.
-  uint32_t mInstanceId;
+  uint16_t mInstanceId;
 
   // Scanning mode selected among enum chreBleScanMode.
   chreBleScanMode mMode;
-
-  // Maximum requested batching delay in ms.
-  uint32_t mReportDelayMs;
 
   // Whether a nanoapp intends to enable this request. If set to false, the
   // following members are invalid: mMode, mReportDelayMs, mFilter.

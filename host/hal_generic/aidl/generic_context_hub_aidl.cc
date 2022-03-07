@@ -122,7 +122,9 @@ ScopedAStatus ContextHub::loadNanoapp(int32_t contextHubId,
     FragmentedLoadTransaction transaction(
         transactionId, appBinary.nanoappId, appBinary.nanoappVersion,
         appBinary.flags, targetApiVersion, appBinary.customBinary);
-    return toServiceSpecificError(mConnection.loadNanoapp(transaction));
+    const bool success = mConnection.loadNanoapp(transaction);
+    mEventLogger.logNanoappLoad(appBinary, success);
+    return toServiceSpecificError(success);
   }
 }
 
@@ -132,8 +134,9 @@ ScopedAStatus ContextHub::unloadNanoapp(int32_t contextHubId, int64_t appId,
     ALOGE("Invalid ID %" PRId32, contextHubId);
     return ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
   } else {
-    return toServiceSpecificError(
-        mConnection.unloadNanoapp(appId, transactionId));
+    const bool success = mConnection.unloadNanoapp(appId, transactionId);
+    mEventLogger.logNanoappUnload(appId, success);
+    return toServiceSpecificError(success);
   }
 }
 
@@ -156,8 +159,11 @@ ScopedAStatus ContextHub::enableNanoapp(int32_t /* contextHubId */,
 ScopedAStatus ContextHub::onSettingChanged(Setting setting, bool enabled) {
   mSettingEnabled[setting] = enabled;
   fbs::Setting fbsSetting;
-  if ((setting != Setting::WIFI_MAIN) && (setting != Setting::WIFI_SCANNING) &&
-      getFbsSetting(setting, &fbsSetting)) {
+  bool isWifiOrBtSetting =
+      (setting == Setting::WIFI_MAIN || setting == Setting::WIFI_SCANNING ||
+       setting == Setting::BT_MAIN || setting == Setting::BT_SCANNING);
+
+  if (!isWifiOrBtSetting && getFbsSetting(setting, &fbsSetting)) {
     mConnection.sendSettingChangedNotification(fbsSetting,
                                                toFbsSettingState(enabled));
   }
@@ -177,6 +183,17 @@ ScopedAStatus ContextHub::onSettingChanged(Setting setting, bool enabled) {
     mConnection.sendSettingChangedNotification(
         fbs::Setting::WIFI_AVAILABLE, toFbsSettingState(isWifiAvailable));
     mIsWifiAvailable = isWifiAvailable;
+  }
+
+  // The BT switches determine whether we can BLE scan which is why things are
+  // mapped like this into CHRE.
+  bool isBtMainEnabled = isSettingEnabled(Setting::BT_MAIN);
+  bool isBtScanEnabled = isSettingEnabled(Setting::BT_SCANNING);
+  bool isBleAvailable = isBtMainEnabled || isBtScanEnabled;
+  if (!mIsBleAvailable.has_value() || (isBleAvailable != mIsBleAvailable)) {
+    mConnection.sendSettingChangedNotification(
+        fbs::Setting::BLE_AVAILABLE, toFbsSettingState(isBleAvailable));
+    mIsBleAvailable = isBleAvailable;
   }
 
   return ndk::ScopedAStatus::ok();
@@ -226,11 +243,14 @@ ScopedAStatus ContextHub::sendMessageToHub(int32_t contextHubId,
   if (contextHubId != kDefaultHubId) {
     ALOGE("Invalid ID %" PRId32, contextHubId);
     return ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
-  } else {
-    return toServiceSpecificError(mConnection.sendMessageToHub(
-        message.nanoappId, message.messageType, message.hostEndPoint,
-        message.messageBody.data(), message.messageBody.size()));
   }
+
+  const bool success = mConnection.sendMessageToHub(
+      message.nanoappId, message.messageType, message.hostEndPoint,
+      message.messageBody.data(), message.messageBody.size());
+  mEventLogger.logMessageToNanoapp(message, success);
+
+  return toServiceSpecificError(success);
 }
 
 ScopedAStatus ContextHub::onHostEndpointConnected(
@@ -256,16 +276,18 @@ ScopedAStatus ContextHub::onHostEndpointDisconnected(
     mConnectedHostEndpoints.erase(in_hostEndpointId);
 
     mConnection.onHostEndpointDisconnected(in_hostEndpointId);
-
-    return ndk::ScopedAStatus::ok();
   } else {
-    return ndk::ScopedAStatus(AStatus_fromExceptionCode(EX_ILLEGAL_ARGUMENT));
+    ALOGE("Unknown host endpoint disconnected (ID: %" PRIu16 ")",
+          in_hostEndpointId);
   }
+
+  return ndk::ScopedAStatus::ok();
 }
 
 void ContextHub::onNanoappMessage(const ::chre::fbs::NanoappMessageT &message) {
   std::lock_guard<std::mutex> lock(mCallbackMutex);
   if (mCallback != nullptr) {
+    mEventLogger.logMessageFromNanoapp(message);
     ContextHubMessage outMessage;
     outMessage.nanoappId = message.app_id;
     outMessage.hostEndPoint = message.host_endpoint;
@@ -335,6 +357,7 @@ void ContextHub::onContextHubRestarted() {
   {
     std::lock_guard<std::mutex> lock(mConnectedHostEndpointsMutex);
     mConnectedHostEndpoints.clear();
+    mEventLogger.logContextHubRestart();
   }
   if (mCallback != nullptr) {
     mCallback->handleContextHubAsyncEvent(AsyncEventType::RESTARTED);
@@ -403,6 +426,8 @@ binder_status_t ContextHub::dump(int fd, const char ** /* args */,
         mDebugDumpPending = false;
       }
     }
+
+    writeToDebugFile(mEventLogger.dump());
     writeToDebugFile("\n-- End of CHRE/ASH debug info --\n");
 
     mDebugFd = kInvalidFd;
