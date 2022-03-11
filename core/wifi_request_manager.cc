@@ -83,6 +83,28 @@ bool WifiRequestManager::configureScanMonitor(Nanoapp *nanoapp, bool enable,
   return success;
 }
 
+uint32_t WifiRequestManager::disableAllSubscriptions(Nanoapp *nanoapp) {
+  uint32_t numSubscriptionsDisabled = 0;
+
+  // Disable active scan monitoring.
+  if (nanoappHasScanMonitorRequest(nanoapp->getInstanceId()) ||
+      nanoappHasPendingScanMonitorRequest(nanoapp->getInstanceId())) {
+    numSubscriptionsDisabled++;
+    configureScanMonitor(nanoapp, false /*enabled*/, nullptr /*cookie*/);
+  }
+
+  // Disable active NAN subscriptions.
+  for (size_t i = 0; i < mNanoappSubscriptions.size(); ++i) {
+    if (mNanoappSubscriptions[i].nanoappInstanceId ==
+        nanoapp->getInstanceId()) {
+      numSubscriptionsDisabled++;
+      nanSubscribeCancel(nanoapp, mNanoappSubscriptions[i].subscriptionId);
+    }
+  }
+
+  return numSubscriptionsDisabled;
+}
+
 bool WifiRequestManager::requestRangingByType(RangingType type,
                                               const void *rangingParams) {
   bool success = false;
@@ -529,6 +551,22 @@ void WifiRequestManager::logStateToBuffer(DebugDumpWrapper &debugDump) const {
   debugDump.print("   Active Scan:\n");
   WifiRequestManager::logErrorHistogram(debugDump, mActiveScanErrorHistogram,
                                         CHRE_ERROR_SIZE);
+
+  if (!mNanoappSubscriptions.empty()) {
+    debugDump.print(" Active NAN service subscriptions:\n");
+    for (const auto &sub : mNanoappSubscriptions) {
+      debugDump.print("  nappID=%" PRIu16 " sub ID=%" PRIu32 "\n",
+                      sub.nanoappInstanceId, sub.subscriptionId);
+    }
+  }
+
+  if (!mPendingNanSubscribeRequests.empty()) {
+    debugDump.print(" Pending NAN service subscriptions:\n");
+    for (const auto &req : mPendingNanSubscribeRequests) {
+      debugDump.print("  nappID=%" PRIu16 " (type %" PRIu8 ") to svc: %s\n",
+                      req.nanoappInstanceId, req.type, req.service.data());
+    }
+  }
 }
 
 bool WifiRequestManager::scanMonitorIsEnabled() const {
@@ -574,6 +612,21 @@ bool WifiRequestManager::addScanMonitorRequestToQueue(Nanoapp *nanoapp,
   }
 
   return success;
+}
+
+bool WifiRequestManager::nanoappHasPendingScanMonitorRequest(
+    uint16_t instanceId) const {
+  if (!mPendingScanMonitorRequests.empty()) {
+    for (size_t i = mPendingScanMonitorRequests.size() - 1; i >= 0; i--) {
+      const PendingScanMonitorRequest &request = mPendingScanMonitorRequests[i];
+      // The last pending request determines the state of the scan monitoring.
+      if (request.nanoappInstanceId == instanceId) {
+        return request.enable;
+      }
+    }
+  }
+
+  return false;
 }
 
 bool WifiRequestManager::updateNanoappScanMonitoringList(bool enable,
@@ -1120,17 +1173,19 @@ void WifiRequestManager::cancelNanSubscriptionsAndInformNanoapps() {
 
 void WifiRequestManager::cancelNanPendingRequestsAndInformNanoapps() {
   for (size_t i = 0; i < mPendingNanSubscribeRequests.size(); ++i) {
+    auto &req = mPendingNanSubscribeRequests[i];
     chreAsyncResult *event = memoryAlloc<chreAsyncResult>();
     if (event == nullptr) {
       LOG_OOM();
+      break;
     } else {
       event->requestType = CHRE_WIFI_REQUEST_TYPE_NAN_SUBSCRIBE;
       event->success = false;
       event->errorCode = CHRE_ERROR_FUNCTION_DISABLED;
-      event->cookie = mPendingNanSubscribeRequests[i].cookie;
+      event->cookie = req.cookie;
       EventLoopManagerSingleton::get()->getEventLoop().postEventOrDie(
           CHRE_EVENT_WIFI_ASYNC_RESULT, event, freeEventDataCallback,
-          mPendingNanSubscribeRequests[i].nanoappInstanceId);
+          req.nanoappInstanceId);
     }
   }
   mPendingNanSubscribeRequests.clear();
@@ -1164,6 +1219,13 @@ void WifiRequestManager::sendNanConfiguration(bool enable) {
     EventLoopManagerSingleton::get()
         ->getHostCommsManager()
         .sendNanConfiguration(enable);
+  }
+}
+
+void WifiRequestManager::onSettingChanged(Setting setting, bool enabled) {
+  if ((setting == Setting::WIFI_AVAILABLE) && !enabled) {
+    cancelNanPendingRequestsAndInformNanoapps();
+    cancelNanSubscriptionsAndInformNanoapps();
   }
 }
 
