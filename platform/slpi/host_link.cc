@@ -256,7 +256,7 @@ void handleUnloadNanoappCallback(SystemCallbackType /*type*/,
     auto *cbData = static_cast<UnloadNanoappCallbackData *>(cookie);
 
     bool success = false;
-    uint32_t instanceId;
+    uint16_t instanceId;
     EventLoop &eventLoop = EventLoopManagerSingleton::get()->getEventLoop();
     if (!eventLoop.findNanoappInstanceIdByAppId(cbData->appId, &instanceId)) {
       LOGE("Couldn't unload app ID 0x%016" PRIx64 ": not found", cbData->appId);
@@ -980,10 +980,11 @@ void HostMessageHandlers::handleDebugDumpRequest(uint16_t hostClientId) {
 void HostMessageHandlers::handleSettingChangeMessage(fbs::Setting setting,
                                                      fbs::SettingState state) {
   Setting chreSetting;
-  SettingState chreSettingState;
+  bool chreSettingEnabled;
   if (HostProtocolChre::getSettingFromFbs(setting, &chreSetting) &&
-      HostProtocolChre::getSettingStateFromFbs(state, &chreSettingState)) {
-    postSettingChange(chreSetting, chreSettingState);
+      HostProtocolChre::getSettingEnabledFromFbs(state, &chreSettingEnabled)) {
+    EventLoopManagerSingleton::get()->getSettingManager().postSettingChange(
+        chreSetting, chreSettingEnabled);
   }
 }
 

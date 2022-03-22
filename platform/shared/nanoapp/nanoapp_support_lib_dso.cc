@@ -218,6 +218,19 @@ uint32_t chreBleGetFilterCapabilities() {
   return (fptr != nullptr) ? fptr() : CHRE_BLE_FILTER_CAPABILITIES_NONE;
 }
 
+WEAK_SYMBOL
+bool chreBleStartScanAsync(chreBleScanMode mode, uint32_t reportDelayMs,
+                           const struct chreBleScanFilter *filter) {
+  auto *fptr = CHRE_NSL_LAZY_LOOKUP(chreBleStartScanAsync);
+  return (fptr != nullptr) ? fptr(mode, reportDelayMs, filter) : false;
+}
+
+WEAK_SYMBOL
+bool chreBleStopScanAsync() {
+  auto *fptr = CHRE_NSL_LAZY_LOOKUP(chreBleStopScanAsync);
+  return (fptr != nullptr) ? fptr() : false;
+}
+
 #endif /* CHRE_NANOAPP_USES_BLE */
 
 WEAK_SYMBOL

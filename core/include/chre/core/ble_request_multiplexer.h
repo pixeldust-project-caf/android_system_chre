@@ -53,7 +53,7 @@ class BleRequestMultiplexer : public RequestMultiplexer<BleRequest> {
    * @return A pointer to a BleRequest that is owned by the provided
    *         nanoapp if one is found otherwise nullptr.
    */
-  BleRequest *findRequest(uint32_t instanceId, size_t *index);
+  const BleRequest *findRequest(uint16_t instanceId, size_t *index);
 
   /**
    * @param status Status type to check if any requests have
@@ -73,6 +73,11 @@ class BleRequestMultiplexer : public RequestMultiplexer<BleRequest> {
    * Removes all disabled requests from the multiplexer.
    */
   void removeDisabledRequests();
+
+  /**
+   * @return true if current maximal request is enabled.
+   */
+  bool isMaximalRequestEnabled();
 };
 
 }  // namespace chre

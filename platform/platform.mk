@@ -239,6 +239,9 @@ endif
 
 # Optional Wi-Fi support.
 ifeq ($(CHRE_WIFI_SUPPORT_ENABLED), true)
+ifeq ($(CHRE_WIFI_NAN_SUPPORT_ENABLED), true)
+SIM_SRCS += platform/linux/pal_nan.cc
+endif
 SIM_SRCS += platform/linux/pal_wifi.cc
 SIM_SRCS += platform/shared/platform_wifi.cc
 endif
@@ -262,6 +265,11 @@ GOOGLE_X86_LINUX_SRCS += platform/linux/assert.cc
 ifeq ($(CHRE_AUDIO_SUPPORT_ENABLED), true)
 GOOGLE_X86_LINUX_SRCS += platform/linux/audio_source.cc
 GOOGLE_X86_LINUX_SRCS += platform/linux/platform_audio.cc
+endif
+
+# Optional WiFi NAN support
+ifeq ($(CHRE_WIFI_NAN_SUPPORT_ENABLED), true)
+GOOGLE_X86_LINUX_SRCS += platform/linux/pal_nan.cc
 endif
 
 # Android-specific Compiler Flags ##############################################
@@ -320,3 +328,6 @@ GOOGLETEST_COMMON_SRCS += platform/linux/audio_source.cc
 GOOGLETEST_COMMON_SRCS += platform/linux/platform_audio.cc
 GOOGLETEST_COMMON_SRCS += platform/tests/log_buffer_test.cc
 GOOGLETEST_COMMON_SRCS += platform/shared/log_buffer.cc
+ifeq ($(CHRE_WIFI_NAN_SUPPORT_ENABLED), true)
+GOOGLETEST_COMMON_SRCS += platform/linux/pal_nan.cc
+endif

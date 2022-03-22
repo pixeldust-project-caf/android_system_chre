@@ -356,6 +356,9 @@ bool HostProtocolChre::getSettingFromFbs(fbs::Setting setting,
     case fbs::Setting::MICROPHONE:
       *chreSetting = Setting::MICROPHONE;
       break;
+    case fbs::Setting::BLE_AVAILABLE:
+      *chreSetting = Setting::BLE_AVAILABLE;
+      break;
     default:
       LOGE("Unknown setting %" PRIu8, static_cast<uint8_t>(setting));
       success = false;
@@ -364,15 +367,15 @@ bool HostProtocolChre::getSettingFromFbs(fbs::Setting setting,
   return success;
 }
 
-bool HostProtocolChre::getSettingStateFromFbs(fbs::SettingState state,
-                                              SettingState *chreSettingState) {
+bool HostProtocolChre::getSettingEnabledFromFbs(fbs::SettingState state,
+                                                bool *chreSettingEnabled) {
   bool success = true;
   switch (state) {
     case fbs::SettingState::DISABLED:
-      *chreSettingState = SettingState::DISABLED;
+      *chreSettingEnabled = false;
       break;
     case fbs::SettingState::ENABLED:
-      *chreSettingState = SettingState::ENABLED;
+      *chreSettingEnabled = true;
       break;
     default:
       LOGE("Unknown state %" PRIu8, static_cast<uint8_t>(state));

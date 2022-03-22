@@ -302,6 +302,7 @@ extern "C" {
 #define CHRE_MESSAGE_PERMISSION_GNSS (UINT32_C(1) << 1)
 #define CHRE_MESSAGE_PERMISSION_WIFI (UINT32_C(1) << 2)
 #define CHRE_MESSAGE_PERMISSION_WWAN (UINT32_C(1) << 3)
+#define CHRE_MESSAGE_PERMISSION_BLE (UINT32_C(1) << 4)
 #define CHRE_MESSAGE_PERMISSION_VENDOR_START (UINT32_C(1) << 24)
 #define CHRE_MESSAGE_PERMISSION_VENDOR_END (UINT32_C(1) << 31)
 
@@ -393,6 +394,11 @@ struct chreNanoappInfo {
      * The instance ID of this nanoapp, which can be used in chreSendEvent() to
      * address an event specifically to this nanoapp.  This identifier is
      * guaranteed to be unique among all nanoapps in the system.
+     *
+     * @since v1.6
+     * Instance ID is guaranteed to never go beyond INT16_MAX. This helps the
+     * instance ID be packed into other information inside an int (useful for
+     * RPC routing).
      */
     uint32_t instanceId;
 };
