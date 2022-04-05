@@ -227,12 +227,6 @@ bool EventLoop::unloadNanoapp(uint16_t instanceId,
         unloadNanoappAtIndex(i);
         mStoppingNanoapp = nullptr;
 
-        // TODO: right now we assume that the nanoapp will clean up all of its
-        // resource allocations in its nanoappEnd callback (memory, sensor
-        // subscriptions, etc.), otherwise we're leaking resources. We should
-        // perform resource cleanup automatically here to avoid these types of
-        // potential leaks.
-
         LOGD("Unloaded nanoapp with instanceId %" PRIu16, instanceId);
         unloaded = true;
       }
@@ -475,6 +469,44 @@ void EventLoop::unloadNanoappAtIndex(size_t index) {
   // Let the app know it's going away
   mCurrentApp = nanoapp.get();
   nanoapp->end();
+
+  // TODO: right now we assume that the nanoapp will clean up all of its
+  // resource allocations in its nanoappEnd callback (memory, sensor
+  // subscriptions, etc.), otherwise we're leaking resources. We should
+  // perform resource cleanup automatically here to avoid these types of
+  // potential leaks.
+
+  // Cleanup resources.
+#ifdef CHRE_WIFI_SUPPORT_ENABLED
+  EventLoopManagerSingleton::get()
+      ->getWifiRequestManager()
+      .disableAllSubscriptions(nanoapp.get());
+#endif  // CHRE_WIFI_SUPPORT_ENABLED
+
+#ifdef CHRE_GNSS_SUPPORT_ENABLED
+  EventLoopManagerSingleton::get()->getGnssManager().disableAllSubscriptions(
+      nanoapp.get());
+#endif  // CHRE_GNSS_SUPPORT_ENABLED
+
+#ifdef CHRE_SENSORS_SUPPORT_ENABLED
+  EventLoopManagerSingleton::get()
+      ->getSensorRequestManager()
+      .disableAllSubscriptions(nanoapp.get());
+#endif  // CHRE_SENSORS_SUPPORT_ENABLED
+
+#ifdef CHRE_AUDIO_SUPPORT_ENABLED
+  EventLoopManagerSingleton::get()
+      ->getAudioRequestManager()
+      .disableAllAudioRequests(nanoapp.get());
+#endif  // CHRE_AUDIO_SUPPORT_ENABLED
+
+#ifdef CHRE_BLE_SUPPORT_ENABLED
+  EventLoopManagerSingleton::get()->getBleRequestManager().disableActiveScan(
+      nanoapp.get());
+#endif  // CHRE_BLE_SUPPORT_ENABLED
+
+  getTimerPool().cancelAllNanoappTimers(nanoapp.get());
+
   mCurrentApp = nullptr;
 
   // Destroy the Nanoapp instance
