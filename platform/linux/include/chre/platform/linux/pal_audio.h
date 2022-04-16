@@ -14,16 +14,12 @@
  * limitations under the License.
  */
 
-#include "chre/platform/power_control_manager.h"
+#ifndef CHRE_PLATFORM_LINUX_PAL_AUDIO_H_
+#define CHRE_PLATFORM_LINUX_PAL_AUDIO_H_
 
-namespace chre {
+/**
+ * @return whether handle 0 is active.
+ */
+bool chrePalAudioIsHandle0Enabled();
 
-void PowerControlManager::preEventLoopProcess(size_t /* numPendingEvents */) {}
-
-void PowerControlManager::postEventLoopProcess(size_t /* numPendingEvents */) {}
-
-bool PowerControlManager::hostIsAwake() {
-  return true;
-}
-
-}  // namespace chre
+#endif  // CHRE_PLATFORM_LINUX_PAL_AUDIO_H_
